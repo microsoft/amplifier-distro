@@ -6,6 +6,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
 from amplifier_distro.server.spawn_registration import register_spawning
 
 # ---------------------------------------------------------------------------
@@ -184,3 +185,22 @@ async def test_extra_kwargs_ignored():
         future_kwarg_from_2027="ignored",
     )
     prepared.spawn.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_self_delegation_depth_forwarded():
+    """self_delegation_depth is passed through to prepared.spawn."""
+    session = _make_session()
+    prepared = _make_prepared()
+    register_spawning(session, prepared, "parent-001")
+    fn = _get_registered_spawn_fn(session)
+
+    await fn(
+        agent_name="my-agent",
+        instruction="go",
+        parent_session=session,
+        agent_configs={"my-agent": {}},
+        sub_session_id="child-006",
+        self_delegation_depth=3,
+    )
+    assert prepared.spawn.call_args[1]["self_delegation_depth"] == 3

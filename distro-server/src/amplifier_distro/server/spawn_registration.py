@@ -17,6 +17,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Synthetic version for dynamically-constructed child bundles.
+# Child sessions created by spawn_fn have no release identity of their own;
+# this sentinel keeps Bundle() happy without implying a real version.
+_CHILD_BUNDLE_VERSION = "1.0.0"
+
 
 def register_spawning(session: Any, prepared: Any, session_id: str) -> None:
     """Register ``session.spawn`` capability on *session*'s coordinator.
@@ -28,6 +33,10 @@ def register_spawning(session: Any, prepared: Any, session_id: str) -> None:
                     sub-session creation.
         session_id: ID of *session* (for logging only).
     """
+    # Deferred import: amplifier_foundation is an optional runtime dependency.
+    # Importing at module level would break if foundation is not installed.
+    from amplifier_foundation import Bundle  # type: ignore[import]
+
     coordinator = session.coordinator
 
     async def spawn_fn(
@@ -99,11 +108,10 @@ def register_spawning(session: Any, prepared: Any, session_id: str) -> None:
             raise ValueError(f"Agent '{agent_name}' not found. Available: {available}")
 
         # --- Build child Bundle from config --------------------------------
-        from amplifier_foundation import Bundle  # type: ignore[import]
-
+        # Bundle is imported above in register_spawning scope, visible here
         child_bundle = Bundle(
             name=agent_name,
-            version="1.0.0",
+            version=_CHILD_BUNDLE_VERSION,
             session=config.get("session", {}),
             providers=config.get("providers", []),
             tools=config.get("tools", []),

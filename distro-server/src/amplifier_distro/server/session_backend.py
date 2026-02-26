@@ -25,6 +25,7 @@ from amplifier_distro.metadata_persistence import (
     register_metadata_hooks,
     write_metadata,
 )
+from amplifier_distro.server.spawn_registration import register_spawning
 from amplifier_distro.transcript_persistence import register_transcript_hooks
 
 logger = logging.getLogger(__name__)
@@ -549,8 +550,6 @@ class FoundationBackend:
             self._wire_event_queue(session, session_id, event_queue)
 
         # Register session spawning capability
-        from amplifier_distro.server.spawn_registration import register_spawning
-
         register_spawning(session, prepared, session_id)
 
         # Pre-start the session worker so the first message doesn't pay
@@ -741,8 +740,6 @@ class FoundationBackend:
             register_metadata_hooks(session, session_dir)
 
             # Register session spawning capability on reconnect
-            from amplifier_distro.server.spawn_registration import register_spawning
-
             register_spawning(session, prepared, session_id)
 
             queue: asyncio.Queue = asyncio.Queue()
