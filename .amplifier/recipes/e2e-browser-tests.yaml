@@ -1,0 +1,914 @@
+name: "e2e-browser-tests"
+description: >
+  End-to-end browser tests for amplifier-distro. Stage 1 checks server health,
+  Stage 2 runs 16 chat browser scenarios covering page load, messaging/streaming,
+  session management, slash commands, CWD/preferences, and UI features (/apps/chat/)
+  PLUS a cross-surface real-time awareness scenario (S17) using two simultaneous
+  browser sessions. An approval gate pauses for Slack login confirmation. Stage 3
+  runs 8 Slack-bridge scenarios. Stage 4 validates and produces a final PASS/FAIL
+  summary table.
+version: "1.3.1"
+author: "amplifier-distro team"
+created: "2026-02-20T14:32:00Z"
+updated: "2026-02-25T19:00:00Z"
+tags:
+  - e2e
+  - browser-testing
+  - chat
+  - slack
+  - distro
+  - qa
+
+# ---------------------------------------------------------------------------
+# Context — defaults; override at execution time if needed
+# ---------------------------------------------------------------------------
+context:
+  server_url: "http://127.0.0.1:8400"
+  slack_workspace: "https://amplifiercrew.slack.com/"
+  slack_channel: "amplifier"
+
+# ---------------------------------------------------------------------------
+# Stages
+# ---------------------------------------------------------------------------
+stages:
+
+  # =========================================================================
+  # STAGE 1: server-check
+  # =========================================================================
+  - name: "server-check"
+    steps:
+      - id: "health-check"
+        type: "bash"
+        command: |
+          set -e
+          response=$(curl -s -o /tmp/_distro_health.json -w "%{http_code}" \
+            --connect-timeout 5 --max-time 10 \
+            "{{server_url}}/api/health" 2>&1)
+          if [ "$response" != "200" ]; then
+            echo "==========================================================" >&2
+            echo "ERROR: amp-distro-server is not healthy (HTTP $response)"   >&2
+            echo "Start the server with: amp-distro-server start --port 8400" >&2
+            echo "==========================================================" >&2
+            exit 1
+          fi
+          cat /tmp/_distro_health.json
+          echo ""
+          echo "Server healthy at {{server_url}}"
+        output: "server_health"
+        timeout: 30
+        on_error: "fail"
+
+
+  # =========================================================================
+  # STAGE 2: chat-tests
+  # 16 scenarios covering all core features of /apps/chat/.
+  #
+  # Scenario groups:
+  #   S01-S02  Page load & initial state
+  #   S03-S05  Messaging & streaming
+  #   S06      Session metadata
+  #   S07-S09  Session history panel
+  #   S10-S11  New session & CWD
+  #   S12-S15  Slash commands
+  #   S16      Theme toggle
+  # =========================================================================
+  - name: "chat-tests"
+    steps:
+      - id: "chat-e2e"
+        agent: "browser-tester:browser-operator"
+        prompt: |
+          You are running automated E2E browser tests for the amplifier-distro
+          chat surface at /apps/chat/. Follow every rule below exactly.
+
+          MANDATORY RULES
+          ---------------
+          - Use --headed on EVERY SINGLE agent-browser command. No exceptions.
+          - Use --session chat-e2e on EVERY agent-browser command.
+          - Take a screenshot at every meaningful step. Name them descriptively.
+          - Report each scenario as exactly PASS, FAIL, or SKIP (with reason).
+          - Build on prior state — do NOT reload the page between scenarios
+            unless a scenario explicitly says to reload.
+
+          Target base URL: {{server_url}}
+
+          ================================================================
+          SCENARIO 1 — Page Load & Title
+          ================================================================
+          Action    : Navigate to {{server_url}}/apps/chat/
+                      Wait up to 10 seconds for the page to fully render.
+          Verify 1a : Page <title> is exactly "Amplifier Chat"
+          Verify 1b : The WebSocket status dot is visible in the header.
+                      Wait up to 10 seconds — it should transition from
+                      disconnected (red) → connecting (amber) → connected (green).
+                      Confirm it is green (class "connected") within 10 s.
+          Screenshot: ch-01-page-load.png
+          PASS → title matches AND status dot is green within 10 s
+          FAIL → title wrong (include actual) OR dot never turns green
+
+          ================================================================
+          SCENARIO 2 — Initial State: Session Panel & Draft Session
+          ================================================================
+          Action    : Remain on the page from Scenario 1. Do NOT reload.
+          Verify 2a : The sessions panel is visible on the left. It contains
+                      at least 1 session card (prior session history).
+          Verify 2b : The app is in draft state — a new session with turn count 0
+                      is the active context. The "New Session CWD" editor is
+                      visible at the bottom of the sessions panel (this is the
+                      app's "no messages yet" state; the CWD editor only shows
+                      for turn-0 draft sessions).
+          Verify 2c : The message input is enabled and shows the placeholder
+                      "Message… (/ for commands)" — ready to accept a first message.
+          Screenshot: ch-02-initial-state.png
+          PASS → session history cards present AND CWD editor visible AND
+                 message input enabled with correct placeholder
+          FAIL → sessions panel empty OR CWD editor missing OR input disabled
+
+          ================================================================
+          SCENARIO 3 — Send Message, Streaming & Markdown Rendering
+          ================================================================
+          Action    : Type the following message in the message input and send
+                      it (press Enter):
+                        hello, briefly list 3 things you can help me with
+                      Wait up to 45 seconds for the bot to fully respond.
+          Verify 3a : Immediately after sending — the user message bubble
+                      appears in the chat area AND the input becomes disabled
+                      (placeholder "Processing…") AND a Stop button (■ Stop)
+                      replaces the Send button.
+          Verify 3b : During streaming — a blinking cursor or streaming
+                      indicator is visible in the bot's response block.
+          Verify 3c : After bot responds — the response contains a list
+                      (at least 3 items rendered as markdown), the Send button
+                      is restored (Stop button gone), and the input is enabled.
+          Screenshots:
+            ch-03a-message-sent.png      (right after sending — user bubble visible)
+            ch-03b-streaming.png         (while bot is streaming)
+            ch-03c-bot-response.png      (after full response — markdown rendered)
+          PASS → all three sub-verifications met
+          FAIL → user bubble missing, streaming never started, or response
+                 never arrived within 45 s (include actual state)
+
+          ================================================================
+          SCENARIO 4 — Stop / Cancel During Execution
+          ================================================================
+          Action    : Send the following message (press Enter):
+                        write a detailed 1500-word short story about a robot
+                        learning to paint, with vivid descriptions of each
+                        scene and character development throughout
+                      Poll the accessibility tree every second. The moment the
+                      Stop (■ Stop) button becomes visible, click it IMMEDIATELY
+                      — do not wait. The goal is to interrupt a long-running
+                      response as early as possible.
+                      Wait up to 15 seconds for cancellation to complete.
+          Verify 4a : A system message containing "Cancellation" or "cancelled"
+                      or "cancel" appears in the chat.
+          Verify 4b : The Send button is restored (Stop button gone).
+          Verify 4c : The message input is enabled again.
+          Screenshots:
+            ch-04a-stop-clicked.png      (immediately after clicking Stop)
+            ch-04b-cancelled.png         (after cancel completes)
+          PASS → system cancel message appears AND Send restored AND input enabled
+          FAIL → bot finishes before Stop could be clicked — report as SKIP with
+                 reason "response completed before Stop could be clicked" and include
+                 the approximate response time observed
+
+          ================================================================
+          SCENARIO 5 — Shift+Enter Inserts Newline (Does Not Send)
+          ================================================================
+          Action    : Click the message input to focus it.
+                      Type the text: first line
+                      Press Shift+Enter.
+                      Type the text: second line
+                      Do NOT press Enter.
+          Verify    : The textarea contains two lines:
+                        first line
+                        second line
+                      The message has NOT been sent (no new user bubble in chat).
+          Screenshot: ch-05-shift-enter.png
+          Action 2  : Press Escape or clear the textarea before continuing
+                      (to avoid accidentally sending this test text).
+          PASS → two lines visible in textarea, no new bubble in chat
+          FAIL → message was sent OR textarea only has one line
+
+          ================================================================
+          SCENARIO 6 — Session Metadata in Sessions Panel
+          ================================================================
+          Action    : Look at the sessions panel (left sidebar). Find the
+                      currently active session card or the session metadata
+                      section at the bottom of the panel.
+          Verify 6a : A session ID (sid) is visible — a hex string like
+                      "54d4e851" or a full UUID.
+          Verify 6b : The CWD (working directory) is visible — an absolute path.
+          Verify 6c : A turn count is visible (e.g., "turn 2" or "2 msgs").
+          Screenshot: ch-06-session-metadata.png
+          PASS → sid visible AND cwd is an absolute path AND turn count visible
+          FAIL → any of the three fields missing or not an absolute path
+
+          ================================================================
+          SCENARIO 7 — Load History Session (Transcript Rendering)
+          ================================================================
+          Action    : In the sessions panel, find a session that is NOT the
+                      currently active one (look for sessions with a ◴ icon
+                      or "history" label, with prior messages visible in preview).
+                      Click that session.
+                      Wait up to 20 seconds for the transcript to load.
+          Verify 7a : A "Loading session history…" banner appears briefly
+                      (or the transcript loads immediately).
+          Verify 7b : The chat area now shows the historical conversation
+                      (at least 1 prior message visible).
+          Verify 7c : The session card gains the "active" class styling.
+          Screenshots:
+            ch-07a-history-clicked.png   (immediately after clicking)
+            ch-07b-transcript-loaded.png (after transcript renders)
+          PASS → transcript visible with at least 1 prior message
+          FAIL → chat area empty after 20 s, or error message shown
+
+          ================================================================
+          SCENARIO 8 — Filter Sessions (Text & sid: Prefix)
+          ================================================================
+          Action    : In the sessions panel header, click the "Filter" button
+                      to open the filter input.
+          Verify 8a : A text input with placeholder "Filter text or sid:abc123"
+                      appears.
+          Action 2  : Type "hello" into the filter input.
+          Verify 8b : The session list narrows to matching sessions and shows
+                      a match count (e.g., "3 matches").
+          Action 3  : Clear the filter. Then note the sid of the currently
+                      active session (from Scenario 6). Type "sid:" followed
+                      by the first 4 characters of that sid.
+          Verify 8c : The list narrows to show only the matching session.
+          Action 4  : Press Escape to close the filter.
+          Screenshots:
+            ch-08a-filter-open.png       (filter textbox visible)
+            ch-08b-filter-text.png       (filtered by "hello")
+            ch-08c-filter-sid.png        (filtered by sid:)
+            ch-08d-filter-cleared.png    (after Escape)
+          PASS → all three sub-verifications met
+          FAIL → filter input doesn't appear, no match count shown, or sid filter fails
+
+          ================================================================
+          SCENARIO 9 — Sort Mode Toggle (Time ↔ Directory)
+          ================================================================
+          Action    : In the sessions panel header, click the "Sort" button.
+          Verify 9a : The button label changes (e.g., "Sort time" → "Sort dir"
+                      or vice versa). The session list re-renders — in
+                      "dir" mode, sessions are grouped by working directory
+                      with collapsible group headers.
+          Action 2  : Click Sort again.
+          Verify 9b : Returns to the previous sort mode.
+          Screenshot: ch-09-sort-dir.png  (while in directory sort mode)
+          PASS → sort button label changes AND list grouping changes
+          FAIL → button does nothing, or list stays identical after toggle
+
+          ================================================================
+          SCENARIO 10 — New Session (+ New Button)
+          ================================================================
+          Action    : Click the "+ New" button in the sessions panel header.
+          Verify 10a: A new session appears at the top of the session list
+                      (or a fresh empty session context is activated).
+          Verify 10b: The chat area is cleared (no messages from the previous
+                      session).
+          Verify 10c: The "New Session CWD" input is visible and editable at
+                      the bottom of the sessions panel.
+          Verify 10d: The new session is in draft state — a turn-0 session
+                      card is visible and the "New Session CWD" editor is
+                      visible at the bottom of the sessions panel (the CWD
+                      editor only appears for draft sessions before any message
+                      is sent; this is the app's idle-before-first-message state).
+          Screenshot: ch-10-new-session.png
+          PASS → all four sub-verifications met
+          FAIL → old messages still visible, CWD input missing, or no new
+                 session context created
+
+          ================================================================
+          SCENARIO 11 — CWD Input Persists via Preferences
+          ================================================================
+          This scenario tests that the default CWD preference is saved and
+          reloaded correctly across page navigations.
+
+          Step 1 — Set the preference:
+            Find the "New Session CWD" textbox at the bottom of the sessions
+            panel. Use the fill command (NOT type) to set the value to /tmp:
+              agent-browser fill @<ref> "/tmp" --session chat-e2e --headed
+            The fill command dispatches proper React input events. After
+            filling, click elsewhere on the page to trigger the blur event
+            (which fires PUT /api/preferences). Wait 2 seconds.
+          Verify 11a: The textbox shows "/tmp" immediately after filling.
+          Screenshot: ch-11a-cwd-set.png
+
+          Step 2 — Reload to confirm persistence:
+            Reload the page: navigate to {{server_url}}/apps/chat/
+            Wait up to 10 s for the page to load and WebSocket to connect.
+          Verify 11b: After reload, the "New Session CWD" input shows "/tmp"
+                      (the preference was saved and loaded from disk).
+          Screenshot: ch-11b-cwd-after-reload.png
+
+          Step 3 — New session inherits the saved CWD:
+            Click "+ New" to start a fresh draft session.
+            Send the message: what directory are you working in?
+            Wait up to 30 seconds for the bot to respond.
+          Verify 11c: The bot's response mentions "/tmp" as its working directory.
+          Verify 11d: The session metadata block shows /tmp as the CWD.
+          Screenshots:
+            ch-11c-bot-confirms-dir.png  (bot response mentioning /tmp)
+            ch-11d-metadata.png          (session metadata showing /tmp)
+          PASS → fill sets /tmp AND /tmp persists after reload AND bot confirms /tmp
+          FAIL → input reverts after fill, /tmp lost after reload, or bot reports
+                 wrong directory (include actual values at each step)
+
+          ================================================================
+          SCENARIO 12 — Slash Command Popup & Keyboard Navigation
+          ================================================================
+          Action    : Click the message input. Type a forward slash: /
+          Verify 12a: A slash command popup appears (role="listbox") showing
+                      at least 8 commands.
+          Action 2  : Press the ↓ (ArrowDown) key twice.
+          Verify 12b: The highlighted item moves down 2 positions.
+          Action 3  : Press the ↑ (ArrowUp) key once.
+          Verify 12c: The highlighted item moves back up 1 position.
+          Action 4  : Press Escape.
+          Verify 12d: The popup closes and the textarea is still focused
+                      (contains "/" but no command has been sent).
+          Screenshot: ch-12-slash-popup.png  (popup visible with all commands)
+          PASS → popup appears with 8+ commands AND arrow keys navigate AND
+                 Escape closes without sending
+          FAIL → popup doesn't appear, keyboard navigation doesn't work, or
+                 Escape sends the command instead of closing
+
+          ================================================================
+          SCENARIO 13 — /help Slash Command
+          ================================================================
+          Action    : Click the message input. Type /help and press Enter
+                      (or select /help from the popup).
+          Verify    : A system message appears in the chat area listing the
+                      available slash commands. It should mention at least:
+                      /clear, /workspace, /status, /tools, /agents.
+          Screenshot: ch-13-help-output.png
+          PASS → system message appears with multiple slash commands listed
+          FAIL → no system message appears, or output is empty
+
+          ================================================================
+          SCENARIO 14 — /clear Slash Command
+          ================================================================
+          Action    : The chat area currently contains messages from prior
+                      scenarios. Type /clear and press Enter (or select from popup).
+          Verify 14a: The chat area is immediately cleared — no messages visible.
+          Verify 14b: The page has NOT been reloaded (browser URL is still
+                      {{server_url}}/apps/chat/ without a reload).
+          Verify 14c: The message input is still functional (can type into it).
+          Screenshot: ch-14-cleared.png   (empty chat area after /clear)
+          PASS → chat area empty AND no page reload AND input still works
+          FAIL → messages still visible, page reloaded, or input broken
+
+          ================================================================
+          SCENARIO 15 — /workspace Slash Command (Activity Panel Toggle)
+          ================================================================
+          Action    : Type /workspace and press Enter (or select from popup).
+          Verify 15a: The view mode toggles — an "Activity" panel becomes
+                      visible on the right side of the chat area.
+          Verify 15b: The "Workspace/Chat" toggle button in the header changes
+                      label (e.g., from "Workspace" to "Chat" or vice versa).
+          Screenshot: ch-15a-workspace-on.png  (activity panel visible)
+          Action 2  : Type /workspace again and press Enter.
+          Verify 15c: The activity panel hides (returns to chat-only layout).
+          Screenshot: ch-15b-workspace-off.png  (activity panel hidden)
+          PASS → activity panel toggles on/off AND header button label changes
+          FAIL → nothing changes after /workspace, or panel fails to toggle
+
+          ================================================================
+          SCENARIO 16 — Theme Toggle (Dark ↔ Light)
+          ================================================================
+          Action    : Find the theme toggle button in the header (sun/moon
+                      chips). Note the current theme (dark or light).
+                      Click the toggle to switch to the opposite theme.
+          Verify 16a: The entire UI color scheme changes immediately (background,
+                      text, panel colors all update).
+          Verify 16b: The toggle button label changes to reflect the new theme
+                      (e.g., "Switch to light mode" ↔ "Switch to dark mode").
+          Screenshot: ch-16a-theme-switched.png  (new theme applied)
+          Action 2  : Reload the page (navigate to {{server_url}}/apps/chat/).
+          Wait      : Up to 10 s for page to load and WebSocket to connect.
+          Verify 16c: The theme persists after reload — the same theme from
+                      before reload is still active (persisted via localStorage).
+          Screenshot: ch-16b-theme-persisted.png  (after reload, theme preserved)
+          PASS → theme switches immediately AND persists after reload
+          FAIL → colors don't change on toggle, or theme resets after reload
+
+          ================================================================
+          FINAL REPORT — output this exact block after all 16 scenarios
+          ================================================================
+
+          CHAT E2E TEST RESULTS
+          ======================
+          Scenario 01 (Page Load & Title)          : [PASS/FAIL] — [evidence]
+          Scenario 02 (Initial State)              : [PASS/FAIL] — [evidence]
+          Scenario 03 (Send & Streaming)           : [PASS/FAIL] — [evidence]
+          Scenario 04 (Stop/Cancel)                : [PASS/FAIL/SKIP] — [evidence]
+          Scenario 05 (Shift+Enter Newline)        : [PASS/FAIL] — [evidence]
+          Scenario 06 (Session Metadata)           : [PASS/FAIL] — [evidence]
+          Scenario 07 (Load History Session)       : [PASS/FAIL] — [evidence]
+          Scenario 08 (Filter Sessions)            : [PASS/FAIL] — [evidence]
+          Scenario 09 (Sort Mode Toggle)           : [PASS/FAIL] — [evidence]
+          Scenario 10 (+ New Session)              : [PASS/FAIL] — [evidence]
+          Scenario 11 (CWD Input & Persistence)   : [PASS/FAIL] — [evidence]
+          Scenario 12 (Slash Popup & Nav)          : [PASS/FAIL] — [evidence]
+          Scenario 13 (/help Command)              : [PASS/FAIL] — [evidence]
+          Scenario 14 (/clear Command)             : [PASS/FAIL] — [evidence]
+          Scenario 15 (/workspace Toggle)          : [PASS/FAIL] — [evidence]
+          Scenario 16 (Theme Toggle & Persist)     : [PASS/FAIL] — [evidence]
+
+          Overall     : [X/16 PASSED] (SKIPs noted separately)
+          Screenshots : [comma-separated list of all files saved]
+        output: "chat_results"
+        timeout: 1800
+
+      - id: "chat-multi-surface-e2e"
+        agent: "browser-tester:browser-operator"
+        prompt: |
+          You are testing REAL-TIME CROSS-SURFACE awareness in the amplifier-distro
+          chat app. This scenario opens TWO independent browser sessions simultaneously
+          to verify that UI updates flow from one surface to another without page reloads.
+
+          MANDATORY RULES
+          ---------------
+          - EVERY agent-browser command must explicitly specify its target session:
+              Surface C (observer) : --headed --session surface-c
+              Surface A (actor)    : --headed --session surface-a
+          - NEVER omit the --session flag. Commands without it will go to the wrong surface.
+          - Take a screenshot after every meaningful action on EITHER surface.
+          - Name screenshots with a surface prefix:
+              sc-17*.png  = Surface C (observer)
+              sa-17*.png  = Surface A (actor)
+          - Report sub-scenarios 17A, 17B, and 17C each as PASS, FAIL, or SKIP.
+
+          Target URL: {{server_url}}/apps/chat/
+
+          ================================================================
+          SETUP — Open Both Surfaces
+          ================================================================
+          Step 1: Open Surface C (observer):
+            agent-browser --headed --session surface-c open {{server_url}}/apps/chat/
+            Wait 5 s for the page to load and WebSocket to connect.
+            Snapshot the sessions panel to count current session cards.
+            Screenshot: sc-17-setup-initial.png
+            Record: INITIAL_COUNT=<number of session cards currently visible>
+
+          Step 2: Open Surface A (actor):
+            agent-browser --headed --session surface-a open {{server_url}}/apps/chat/
+            Wait 5 s for the page to load and WebSocket to connect.
+            Screenshot: sa-17-setup-initial.png
+
+          ================================================================
+          SUB-SCENARIO 17A — New Session Appears on Observer
+          ================================================================
+          Surface A — create a new session and send a message:
+            - Click the "+ New" button.
+            - Type and send: testing cross-surface discovery
+            - Wait up to 30 s for the bot to respond.
+            - Screenshot: sa-17a-bot-replied.png
+            - From the session metadata section (bottom of sessions panel),
+              read the session ID (sid field).
+            - Record: SURFACE_A_SESSION_ID=<the session id>
+
+          Surface C — trigger discovery and verify:
+            - Take a snapshot of the sessions panel. This brings the Surface C
+              window into focus, which fires the browser focus event and triggers
+              an immediate history discovery check (discoverNewHistorySessions).
+            - Wait up to 35 s. If a "Sync" button with a badge count appears
+              before 35 s, click it immediately to force discovery.
+            - Screenshot: sc-17a-after-wait.png
+
+          Verify 17A:
+            - The session SURFACE_A_SESSION_ID is now visible in Surface C's
+              sessions panel.
+            - It shows a "New" badge (indigo colour) on its session card.
+          PASS → new session card with "New" badge visible on Surface C within 35 s
+          FAIL → session not visible, or visible but missing the "New" badge
+
+          ================================================================
+          SUB-SCENARIO 17B — "Updated" Badge on Inactive Session
+          ================================================================
+          NOTE: The "Updated" badge is driven by revision polling (7 s interval).
+          For polling to detect a change, Surface C must first LOAD the session
+          so that a baseline localRevision is recorded. Only then can a
+          subsequent change from Surface A be detected as a delta.
+
+          Surface C — step 1: establish a baseline by loading the session:
+            - Click on SURFACE_A_SESSION_ID in the sessions panel to load it.
+            - Wait up to 20 s for the transcript to fully render.
+            - Screenshot: sc-17b-session-loaded.png
+            - (This records the session's current localRevision on Surface C.)
+
+          Surface C — step 2: switch away to make the session inactive:
+            - Click on any OTHER session card (not SURFACE_A_SESSION_ID) to
+              make it the active session.
+            - Screenshot: sc-17b-different-session-active.png
+
+          Surface A — step 3: send a follow-up message to create a new revision:
+            - In the Surface A browser, send another message:
+                follow-up cross-surface message
+            - Wait up to 30 s for the bot to respond.
+            - Screenshot: sa-17b-follow-up-sent.png
+
+          Surface C — step 4: wait for revision polling to detect the change:
+            - Wait up to 15 s (the revision polling interval is 7 s; allow margin).
+            - Snapshot the sessions panel and look for the "Updated" badge
+              (amber colour) on the SURFACE_A_SESSION_ID card.
+            - Screenshot: sc-17b-check-badge.png
+
+          Verify 17B:
+            - The session card for SURFACE_A_SESSION_ID in Surface C shows
+              an "Updated" badge (amber colour).
+          PASS → "Updated" badge visible on the inactive session card within 15 s
+          FAIL → no badge after 15 s (include actual badge state on card)
+
+          ================================================================
+          SUB-SCENARIO 17C — "New Messages ↓" Pill on Active Session
+          ================================================================
+          Surface C — load Surface A's session and scroll to the top:
+            - Click on SURFACE_A_SESSION_ID in the sessions panel to load it
+              and make it the active session. Wait up to 20 s for transcript to load.
+            - Screenshot: sc-17c-session-loaded.png
+            - Scroll to the TOP of the message list so the latest messages are
+              OUT of view. Use one of these methods (in order of preference):
+                1. Click the "Jump to top" (↑) button if it appears in the chat area.
+                2. Press Ctrl+Home while the message list has focus.
+                3. Use keyboard navigation or the scrollbar to reach the top.
+            - Verify the latest messages are no longer visible at the bottom.
+            - Screenshot: sc-17c-scrolled-up.png
+            - If the message list is too short to scroll (fewer than 5 messages
+              from at least 2 bot turns), report SKIP with reason "not enough
+              messages to enable scrolling" and stop this sub-scenario.
+
+          Surface A — send another message while Surface C is scrolled up:
+            - Send: new message while observer is scrolled up
+            - Wait up to 30 s for the bot to respond.
+            - Screenshot: sa-17c-message-sent.png
+
+          Surface C — wait for the "New messages ↓" pill to appear:
+            - Wait up to 50 s for the following chain to complete:
+                (a) Revision polling detects the new revision (~7 s interval)
+                (b) 4 s auto-refresh debounce fires
+                (c) Transcript updates with new messages
+                (d) "New messages ↓" pill appears centred at the bottom of the chat area
+            - Snapshot and look for the pill indicator.
+            - Screenshot: sc-17c-new-messages-pill.png
+
+          Verify 17C:
+            - A "New messages ↓" pill (or equivalent indicator) is visible
+              at the bottom of the chat area while the view is still scrolled up.
+          PASS → "New messages ↓" pill visible while view is at the top
+          FAIL → pill does not appear after 50 s (include scroll state evidence)
+          SKIP → message list was too short to scroll (include reason)
+
+          ================================================================
+          FINAL REPORT — output this exact block
+          ================================================================
+
+          CROSS-SURFACE AWARENESS E2E RESULTS
+          =====================================
+          Surface A Session ID   : [SURFACE_A_SESSION_ID or UNKNOWN]
+          Initial session count  : [INITIAL_COUNT]
+
+          Sub-scenario 17A (New Session Discovery) : [PASS/FAIL] — [evidence]
+          Sub-scenario 17B (Updated Badge)         : [PASS/FAIL] — [evidence]
+          Sub-scenario 17C (New Messages ↓ Pill)   : [PASS/FAIL/SKIP] — [evidence]
+
+          Overall     : [X/3 PASSED] (SKIPs noted separately)
+          Screenshots : [comma-separated list of all files saved]
+        output: "multi_surface_results"
+        timeout: 600
+
+    # -----------------------------------------------------------------------
+    # APPROVAL GATE — pause before Slack bridge tests
+    # -----------------------------------------------------------------------
+    approval:
+      required: true
+      prompt: |
+        Chat E2E tests complete (16 single-surface + 3 cross-surface scenarios).
+
+        Single-Surface Results (S01–S16)
+        ---------------------------------
+        {{chat_results}}
+
+        Cross-Surface Results (S17A–S17C)
+        ----------------------------------
+        {{multi_surface_results}}
+
+        ---------------------------------------------------------------
+        Ready to run Slack bridge tests.
+
+        When you APPROVE, a headed browser window will open automatically
+        pointing at {{slack_workspace}}.
+
+        A) Already logged in: workspace loads immediately, tests run automatically.
+        B) Login required: log in through the browser window — credentials saved
+           to ~/.agent-browser/profiles/slack-distro-test for future runs.
+
+        Approve → Slack bridge tests run next.
+        Deny    → Stop here (chat results already saved).
+        ---------------------------------------------------------------
+      timeout: 0
+      default: "deny"
+
+
+  # =========================================================================
+  # STAGE 3: slack-tests
+  # 8 scenarios:
+  #   S1-S6  core messaging and session lifecycle
+  #   S7     custom working directory via --dir flag
+  #   S8     default working directory from settings.yaml
+  # =========================================================================
+  - name: "slack-tests"
+    steps:
+      - id: "slack-e2e"
+        agent: "browser-tester:browser-operator"
+        prompt: |
+          You are running automated E2E browser tests for the amplifier-distro
+          Slack bridge (bot name: Distro).
+
+          MANDATORY RULES
+          ---------------
+          - Use --headed on EVERY SINGLE agent-browser command. No exceptions.
+          - Use --profile ~/.agent-browser/profiles/slack-distro-test on EVERY
+            agent-browser command. Persists Slack login across runs.
+            Do NOT use --session for this stage.
+          - Take a screenshot at every meaningful step.
+          - Name screenshots descriptively: sl-01-login-check.png, etc.
+          - Report each scenario as exactly PASS or FAIL plus evidence.
+          - CRITICAL: Extract the session ID from the @Distro new reply in
+            Scenario 3 and reuse it verbatim in Scenario 5.
+            Record it as: CAPTURED_ID=<the-exact-id>
+
+          Target workspace : {{slack_workspace}}
+          Target channel   : #{{slack_channel}}
+          Bot name         : Distro
+
+          ================================================================
+          SCENARIO 1 — Login Verification (with login-page handling)
+          ================================================================
+          Action  : Navigate to {{slack_workspace}}
+
+          CASE A — Already logged in (workspace sidebar is visible):
+            Screenshot: sl-01-logged-in.png
+            PASS → sidebar visible, continue to Scenario 2 immediately.
+
+          CASE B — Login page appeared:
+            Screenshot: sl-01-login-required.png
+            Wait up to 120 seconds for the workspace sidebar to appear.
+            Once sidebar visible:
+              Screenshot: sl-01-login-complete.png
+              PASS → user logged in; continue.
+            If still not visible after 120 s:
+              Screenshot: sl-01-login-timeout.png
+              FAIL → login timed out after 120 s.
+
+          ================================================================
+          SCENARIO 2 — Navigate to Channel
+          ================================================================
+          Action  : Click #{{slack_channel}} in the sidebar (or Cmd+K / Ctrl+K).
+          Verify  : Channel feed for #{{slack_channel}} is open.
+          Screenshot: sl-02-channel.png
+          PASS → channel feed loaded
+          FAIL → channel not found or did not load
+
+          ================================================================
+          SCENARIO 3 — @Distro new (Start New Session)
+          ================================================================
+          Action  : In #{{slack_channel}} type exactly: @Distro new
+                    Send. Wait up to 15 s for Distro to reply.
+          Verify  : Bot replies with "Started new session" and a session ID.
+          CRITICAL: Extract and record: CAPTURED_ID=<the-exact-id>
+          Screenshots:
+            sl-03a-distro-new-sent.png
+            sl-03b-distro-new-reply.png
+          PASS → bot replied "Started new session <id>" within 15 s
+          FAIL → no reply within 15 s or reply lacked an ID
+
+          ================================================================
+          SCENARIO 4 — Thread: Ask the Date Question
+          ================================================================
+          Action  : Reply in the @Distro new thread. Type:
+                      what day is it today?
+                    Send. Wait up to 30 s for bot to respond in the thread.
+          Verify  : Bot answers with today's date.
+          Screenshots:
+            sl-04a-thread-question-sent.png
+            sl-04b-thread-bot-reply.png
+          PASS → bot responds within 30 s with a date-related answer
+          FAIL → no response or bot did not answer
+
+          ================================================================
+          SCENARIO 5 — @Distro connect <id>
+          ================================================================
+          Action  : Go back to the MAIN #{{slack_channel}} feed. Type exactly:
+                      @Distro connect <CAPTURED_ID from Scenario 3>
+                    Send. Wait up to 15 s for bot to reply.
+          Verify  : Bot replies "Connected to session <id>" matching CAPTURED_ID.
+          Screenshots:
+            sl-05a-connect-sent.png
+            sl-05b-connect-reply.png
+          PASS → bot confirmed "Connected to session <id>" within 15 s
+          FAIL → no reply, ID mismatch, or wrong message
+
+          ================================================================
+          SCENARIO 6 — Thread Memory: Recall First Question
+          ================================================================
+          Action  : Reply in the @Distro connect thread. Type:
+                      what was the first question I asked you in this session?
+                    Send. Wait up to 30 s for bot to respond.
+          Verify  : Bot recalls "what day is it today?".
+          Screenshots:
+            sl-06a-memory-question-sent.png
+            sl-06b-memory-bot-reply.png
+          PASS → bot correctly recalls the first question
+          FAIL → bot does not recall, gives wrong answer, or times out
+
+          ================================================================
+          SCENARIO 7 — @Distro new --dir /tmp (Custom Working Directory)
+          ================================================================
+          Action  : Go to MAIN #{{slack_channel}} feed. Type exactly:
+                      @Distro new --dir /tmp
+                    Send. Wait up to 15 s for bot to reply.
+          Verify  : Bot replies "Started new session <id>".
+          Then    : Reply in that thread. Type:
+                      what directory are you working in?
+                    Send. Wait up to 30 s for bot to respond.
+          Verify  : Bot confirms working directory is /tmp.
+          Screenshots:
+            sl-07a-distro-new-dir-sent.png
+            sl-07b-distro-new-dir-reply.png
+            sl-07c-dir-question-sent.png
+            sl-07d-dir-question-bot-reply.png
+          PASS → session starts AND bot confirms /tmp as working directory
+          FAIL → bot doesn't mention /tmp, or times out
+
+          ================================================================
+          SCENARIO 8 — Default Working Directory (from settings.yaml)
+          ================================================================
+          Action  : Go to MAIN #{{slack_channel}} feed. Type exactly:
+                      @Distro new
+                    Send (no --dir flag). Wait up to 15 s for bot to reply.
+          Verify  : Bot replies "Started new session <id>".
+          Then    : Reply in that thread. Type:
+                      what directory are you working in?
+                    Send. Wait up to 30 s for bot to respond.
+          Verify  : Bot reports an absolute path (begins with /).
+                    It must NOT be /tmp (no leakage from Scenario 7).
+                    The path should match slack.default_working_dir from
+                    settings.yaml (typically the user's home directory).
+          Screenshots:
+            sl-08a-distro-new-default-sent.png
+            sl-08b-distro-new-default-reply.png
+            sl-08c-default-dir-question-sent.png
+            sl-08d-default-dir-bot-reply.png
+          PASS → bot reports an absolute path that is NOT /tmp
+          FAIL → bot reports /tmp (flag leaked), a relative path, or times out
+
+          ================================================================
+          FINAL REPORT — output this exact block after all 8 scenarios
+          ================================================================
+
+          SLACK BRIDGE E2E TEST RESULTS
+          ==============================
+          Scenario 1 (Login Check)           : [PASS/FAIL] — [evidence]
+          Scenario 2 (Navigate Channel)      : [PASS/FAIL] — [evidence]
+          Scenario 3 (@Distro new)           : [PASS/FAIL] — ID: [id or N/A]
+          Scenario 4 (Thread Question)       : [PASS/FAIL] — [evidence]
+          Scenario 5 (@Distro connect)       : [PASS/FAIL] — [evidence]
+          Scenario 6 (Thread Memory)         : [PASS/FAIL] — [evidence]
+          Scenario 7 (--dir /tmp)            : [PASS/FAIL] — [evidence]
+          Scenario 8 (Default Working Dir)   : [PASS/FAIL] — [evidence]
+
+          Overall     : [X/8 PASSED]
+          Screenshots : [comma-separated list of all files saved]
+        output: "slack_results"
+        timeout: 1200
+
+
+  # =========================================================================
+  # STAGE 4: validate
+  # =========================================================================
+  - name: "validate"
+    steps:
+      - id: "final-validation"
+        agent: "recipes:result-validator"
+        prompt: |
+          Validate the complete end-to-end browser test run for amplifier-distro.
+
+          CHAT RESULTS (S01–S16)
+          ----------------------
+          {{chat_results}}
+
+          CROSS-SURFACE RESULTS (S17A–S17C)
+          ----------------------------------
+          {{multi_surface_results}}
+
+          SLACK BRIDGE RESULTS
+          --------------------
+          {{slack_results}}
+
+          ================================================================
+          ACCEPTANCE CRITERIA
+          ================================================================
+
+          Chat surface (/apps/chat/) — 16 single-surface scenarios:
+            01. Page title is exactly "Amplifier Chat" AND status dot is green
+            02. Sessions panel has history AND app in draft state (CWD editor visible,
+                message input enabled) — app never shows "No active session" text;
+                it always starts in draft mode
+            03. Send message → user bubble → streaming → bot responds with markdown
+            04. Stop button cancels generation (SKIP accepted if response completed
+                before Stop could be clicked)
+            05. Shift+Enter inserts newline without sending
+            06. Session metadata shows sid, absolute CWD, and turn count
+            07. Click history session → transcript renders in chat area
+            08. Filter by text shows match count; sid: filter narrows to 1 session
+            09. Sort toggle changes between time and directory grouping
+            10. + New clears chat, shows CWD editor, session in draft state (turn 0)
+            11. fill CWD to /tmp → /tmp persists after page reload → bot confirms /tmp
+            12. / opens popup ≥8 commands; arrow keys navigate; Escape closes
+            13. /help outputs system message listing slash commands
+            14. /clear empties chat without page reload
+            15. /workspace toggles activity panel on and off
+            16. Theme toggle switches dark/light AND persists after page reload
+
+          Cross-surface real-time awareness — 3 sub-scenarios (Surface A actor,
+          Surface C observer, both running as independent browser sessions):
+            17A. Surface A creates a new session → Surface C sees it appear in
+                 its sessions panel with a "New" badge within 35 s
+            17B. Surface A sends a message to an inactive session → Surface C
+                 shows an "Updated" badge on that session card within 15 s
+            17C. Surface C has the session active and scrolled up → Surface A
+                 sends a message → Surface C shows a "New messages ↓" pill
+                 (SKIP accepted if not enough messages to enable scrolling)
+
+          Slack bridge — 8 scenarios:
+            1. Logged into {{slack_workspace}}
+            2. #{{slack_channel}} channel loaded
+            3. @Distro new → "Started new session <id>" within 15 s
+            4. Thread date question → bot answers within 30 s
+            5. @Distro connect <id> → bot confirmed "Connected to session <id>"
+            6. Thread memory → bot recalled "what day is it today?"
+            7. @Distro new --dir /tmp → bot confirms /tmp as working directory
+            8. @Distro new (no --dir) → bot reports default dir, NOT /tmp
+
+          ================================================================
+          REQUIRED OUTPUT — produce exactly this summary table
+          ================================================================
+
+          ================================================================
+                  AMPLIFIER-DISTRO  E2E BROWSER TEST SUMMARY
+          ================================================================
+
+          CHAT SURFACE  ({{server_url}}/apps/chat/)
+          --------------------------------------------------
+          [PASS/FAIL     ] S01 — Page title "Amplifier Chat" + status dot green
+          [PASS/FAIL     ] S02 — Session history present, "No active session", CWD input
+          [PASS/FAIL     ] S03 — Send message → streaming → markdown bot response
+          [PASS/FAIL/SKIP] S04 — Stop/cancel during execution
+          [PASS/FAIL     ] S05 — Shift+Enter inserts newline
+          [PASS/FAIL     ] S06 — Session metadata: sid, CWD, turn count
+          [PASS/FAIL     ] S07 — History session loads transcript
+          [PASS/FAIL     ] S08 — Filter by text and sid: prefix
+          [PASS/FAIL     ] S09 — Sort mode toggle (time ↔ dir)
+          [PASS/FAIL     ] S10 — + New session: clean state, CWD input visible
+          [PASS/FAIL     ] S11 — CWD /tmp persists and bot confirms /tmp
+          [PASS/FAIL     ] S12 — Slash popup: 8+ commands, arrow nav, Escape
+          [PASS/FAIL     ] S13 — /help: system message with command list
+          [PASS/FAIL     ] S14 — /clear: empties chat without reload
+          [PASS/FAIL     ] S15 — /workspace: activity panel toggles
+          [PASS/FAIL     ] S16 — Theme toggle: switches + persists after reload
+
+          Chat Result : [PASS (16/16) | PARTIAL (x/16) | FAIL (x/16)]
+          (SKIPs: [list any SKIPs with reason])
+
+          CROSS-SURFACE AWARENESS  (two simultaneous browser sessions)
+          -------------------------------------------------------------
+          [PASS/FAIL     ] S17A — New session on Surface A → "New" badge on Surface C
+          [PASS/FAIL     ] S17B — Message to inactive session → "Updated" badge on Surface C
+          [PASS/FAIL/SKIP] S17C — Active + scrolled up → "New messages ↓" pill on Surface C
+
+          Cross-Surface Result : [PASS (3/3) | PARTIAL (x/3) | FAIL (x/3)]
+          (SKIPs: [list any SKIPs with reason])
+
+          SLACK BRIDGE  ({{slack_workspace}} -> #{{slack_channel}})
+          ----------------------------------------------------------
+          [PASS/FAIL] S1 — Already logged into Slack
+          [PASS/FAIL] S2 — #{{slack_channel}} channel loaded
+          [PASS/FAIL] S3 — @Distro new → session ID received
+          [PASS/FAIL] S4 — Thread date question answered within 30 s
+          [PASS/FAIL] S5 — @Distro connect confirmed
+          [PASS/FAIL] S6 — Bot recalled "what day is it today?"
+          [PASS/FAIL] S7 — --dir /tmp respected as working directory
+          [PASS/FAIL] S8 — Default working dir from settings.yaml used
+
+          Slack Bridge Result : [PASS (8/8) | PARTIAL (x/8) | FAIL (x/8)]
+
+          ================================================================
+          OVERALL : [ALL PASS | PARTIAL | FAILURES FOUND]
+          ================================================================
+
+          [If any FAILs — list each with a recommended next step:]
+            - [surface] SN: [reason] -> [suggested fix / retest step]
+        output: "final_report"
+        timeout: 300
