@@ -1,8 +1,8 @@
 """Local overlay bundle management.
 
-The distro creates a local bundle that includes ``amplifier-start``.
+The distro creates a local bundle that includes the maintained distro bundle.
 The wizard and settings apps modify this overlay; the underlying
-amplifier-start bundle is never touched.
+distro bundle is never touched.
 
 The overlay is a directory containing a ``bundle.yaml`` file:
 
@@ -69,10 +69,10 @@ def get_includes(data: dict[str, Any] | None = None) -> list[str]:
 
 
 def ensure_overlay(provider: Provider) -> Path:
-    """Create (or update) the overlay bundle with amplifier-start + a provider.
+    """Create (or update) the overlay bundle with include to maintained bundle + a provider.
 
     If the overlay already exists, the provider include is added only if
-    not already present.  The amplifier-start include is always ensured.
+    not already present.  The distro bundle include is always ensured.
     Returns the path to the overlay directory.
     """
     data = read_overlay()

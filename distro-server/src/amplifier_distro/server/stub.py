@@ -133,7 +133,7 @@ def stub_detect_environment() -> dict[str, Any]:
         "overlay_bundle": {
             "bundle": {"name": "distro", "version": "0.1.0"},
             "includes": [
-                {"bundle": "git+https://github.com/payneio/amplifier-start@main"},
+                {"bundle": "git+https://github.com/microsoft/amplifier-distro@main#subdirectory=bundle"},
                 {
                     "bundle": "git+https://github.com/microsoft/amplifier-foundation@main#subdirectory=providers/anthropic-sonnet.yaml"
                 },

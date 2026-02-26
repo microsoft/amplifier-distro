@@ -39,7 +39,7 @@ class Provider:
 
 
 # --- Ecosystem URIs ---
-AMPLIFIER_START_URI = "git+https://github.com/payneio/amplifier-start@main"
+AMPLIFIER_START_URI = "git+https://github.com/microsoft/amplifier-distro@main#subdirectory=bundle"
 FOUNDATION_GIT_URI = "git+https://github.com/microsoft/amplifier-foundation@main"
 
 

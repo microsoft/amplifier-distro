@@ -314,7 +314,7 @@ class FoundationBackend:
         """Load and prepare a bundle via foundation.
 
         If a local overlay bundle exists (created by the install wizard),
-        loads it by path.  The overlay includes amplifier-start and any
+        loads it by path.  The overlay includes the maintained distro bundle and any
         user-selected features, so everything composes automatically.
         Falls back to loading the bundle by name if no overlay exists.
         """

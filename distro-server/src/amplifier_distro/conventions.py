@@ -25,7 +25,7 @@ DISTRO_HOME = os.environ.get("AMPLIFIER_DISTRO_HOME", "~/.amplifier-distro")
 DISTRO_SETTINGS_FILENAME = "settings.yaml"  # distro-layer config (inside DISTRO_HOME)
 
 # --- Local Overlay Bundle ---
-# The distro creates a local overlay bundle that includes amplifier-start.
+# The distro creates a local overlay bundle that includes the distro bundle.
 # The wizard/settings apps modify this overlay; the underlying bundle is untouched.
 DISTRO_OVERLAY_DIR = f"{DISTRO_HOME}/bundle"
 
