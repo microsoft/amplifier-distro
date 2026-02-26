@@ -1,3 +1,9 @@
-# Repository setup required :wave:
-    
-Please visit the website URL :point_right: for this repository to complete the setup of this repository and configure access controls.
+# amplifier-distro
+
+Monorepo for Amplifier distribution components.
+
+## Projects
+
+| Directory | Description |
+|-----------|-------------|
+| [`distro-server/`](distro-server/) | The Amplifier Experience Server -- web chat, Slack, voice, and more |
