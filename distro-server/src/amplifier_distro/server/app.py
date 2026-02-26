@@ -209,14 +209,9 @@ class DistroServer:
         @self._core_router.get("/integrations")
         async def get_integrations() -> JSONResponse:
             """Status of each integration (Slack, Voice)."""
-            from amplifier_distro.conventions import AMPLIFIER_HOME, KEYS_FILENAME
+            from amplifier_distro.server.apps.settings import load_keys
 
-            keys_path = Path(AMPLIFIER_HOME).expanduser() / KEYS_FILENAME
-            keys_data: dict[str, str] = {}
-            if keys_path.exists():
-                import yaml as _yaml
-
-                keys_data = _yaml.safe_load(keys_path.read_text()) or {}
+            keys_data = load_keys()
 
             def _check_key(env_var: str) -> str:
                 if os.environ.get(env_var):
