@@ -1,0 +1,16 @@
+[Unit]
+Description=Amplifier Distro Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=amp-distro-server --host 127.0.0.1 --port 8400
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+WorkingDirectory=%h
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

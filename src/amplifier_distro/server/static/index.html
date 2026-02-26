@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amplifier</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+/* ------------------------------------------------------------------ */
+/*  Design Tokens (shared with all Amplifier pages)                    */
+/* ------------------------------------------------------------------ */
+:root {
+  --bg-primary: #111827;
+  --bg-secondary: #1f2937;
+  --bg-card: #374151;
+  --text-primary: #f9fafb;
+  --text-secondary: #9ca3af;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --border: #4b5563;
+  --radius: 8px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reset & Base                                                       */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  padding: 48px 20px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Container                                                          */
+/* ------------------------------------------------------------------ */
+.container {
+  max-width: 640px;
+  width: 100%;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Header                                                             */
+/* ------------------------------------------------------------------ */
+.logo {
+  font-size: 32px;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 8px;
+}
+
+.tagline {
+  color: var(--text-secondary);
+  font-size: 15px;
+  margin-bottom: 32px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  App Cards                                                          */
+/* ------------------------------------------------------------------ */
+.section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.apps-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.app-card {
+  display: block;
+  padding: 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  text-decoration: none;
+  color: var(--text-primary);
+  transition: all 0.15s ease;
+}
+
+.app-card:hover {
+  border-color: var(--accent);
+  background: var(--bg-card);
+  transform: translateY(-1px);
+}
+
+.app-icon {
+  font-size: 24px;
+  margin-bottom: 10px;
+}
+
+.app-name {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.app-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Links Section                                                      */
+/* ------------------------------------------------------------------ */
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.links a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  transition: color 0.15s ease;
+}
+
+.links a:hover {
+  color: var(--accent);
+}
+
+.links .sep {
+  color: var(--border);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Footer                                                             */
+/* ------------------------------------------------------------------ */
+.footer {
+  font-size: 12px;
+  color: var(--border);
+}
+
+.footer a {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.footer a:hover {
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Mobile                                                             */
+/* ------------------------------------------------------------------ */
+@media (max-width: 540px) {
+  body { padding: 24px 16px; }
+  .logo { font-size: 26px; }
+  .apps-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="logo">Amplifier</div>
+  <p class="tagline">Your AI development environment is configured and ready.</p>
+
+  <div class="section-title">Apps</div>
+  <div class="apps-grid">
+    <a href="/apps/chat/" class="app-card">
+      <div class="app-icon">&#x1F4AC;</div>
+      <div class="app-name">Chat</div>
+      <div class="app-desc">AI chat in your browser, backed by Amplifier sessions.</div>
+    </a>
+    <a href="/apps/voice/" class="app-card">
+      <div class="app-icon">&#x1F3A4;</div>
+      <div class="app-name">Voice</div>
+      <div class="app-desc">Real-time voice conversations via OpenAI Realtime API.</div>
+    </a>
+    <a href="/apps/slack/setup-ui" class="app-card">
+      <div class="app-icon">&#x1F4E8;</div>
+      <div class="app-name">Slack</div>
+      <div class="app-desc">Connect Slack channels to Amplifier sessions.</div>
+    </a>
+    <a href="/apps/settings/" class="app-card">
+      <div class="app-icon">&#x2699;</div>
+      <div class="app-name">Settings</div>
+      <div class="app-desc">Manage providers, features, and bridges.</div>
+    </a>
+  </div>
+
+  <div class="section-title">Learn More</div>
+  <div class="links">
+    <a href="https://ramparte.github.io/amplifier-tutorial" target="_blank">Tutorial</a>
+    <span class="sep">&middot;</span>
+    <a href="https://github.com/microsoft/amplifier/tree/main/docs" target="_blank">Documentation</a>
+    <span class="sep">&middot;</span>
+    <a href="https://ramparte.github.io/amplifier-stories" target="_blank">Stories</a>
+  </div>
+
+  <div class="footer">
+    <a href="/apps/install-wizard/">Setup wizard</a> &middot;
+    <a href="/api/apps">API</a> &middot;
+    <a href="/api/docs">Swagger UI</a> &middot;
+    <a href="/api/openapi.json">OpenAPI spec</a>
+  </div>
+</div>
+
+</body>
+</html>

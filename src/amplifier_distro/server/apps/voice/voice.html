@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amplifier Voice</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+/* ------------------------------------------------------------------ */
+/*  Design Tokens (shared with wizard.html)                            */
+/* ------------------------------------------------------------------ */
+:root {
+  --bg-primary: #111827;
+  --bg-secondary: #1f2937;
+  --bg-card: #374151;
+  --text-primary: #f9fafb;
+  --text-secondary: #9ca3af;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --border: #4b5563;
+  --radius: 8px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reset & Base                                                       */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 20px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Card                                                               */
+/* ------------------------------------------------------------------ */
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 40px;
+  width: 100%;
+  max-width: 560px;
+  margin-top: 40px;
+}
+
+.logo {
+  font-size: 32px;
+  font-weight: 800;
+  text-align: center;
+  margin-bottom: 4px;
+  background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.tagline {
+  color: var(--text-secondary);
+  font-size: 15px;
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Status Bar                                                         */
+/* ------------------------------------------------------------------ */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-secondary);
+  transition: background 0.3s ease;
+}
+
+.status-dot.ready { background: var(--success); }
+.status-dot.connecting { background: var(--warning); animation: pulse 1s ease-in-out infinite; }
+.status-dot.active { background: var(--success); animation: pulse 1.5s ease-in-out infinite; }
+.status-dot.error { background: var(--error); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.status-text {
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Mic Visualizer                                                     */
+/* ------------------------------------------------------------------ */
+.mic-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+.mic-ring {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.mic-ring.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 30px rgba(59, 130, 246, 0.25);
+}
+
+.mic-ring.listening {
+  border-color: var(--success);
+  box-shadow: 0 0 30px rgba(34, 197, 94, 0.25);
+}
+
+.mic-icon {
+  font-size: 40px;
+  color: var(--text-secondary);
+  transition: color 0.3s ease;
+}
+
+.mic-ring.active .mic-icon,
+.mic-ring.listening .mic-icon {
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Button                                                             */
+/* ------------------------------------------------------------------ */
+.btn-voice {
+  width: 100%;
+  padding: 14px 24px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-voice:hover { background: var(--accent-hover); }
+.btn-voice:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-voice.end {
+  background: var(--error);
+}
+.btn-voice.end:hover {
+  background: #dc2626;
+}
+
+.btn-voice .spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ------------------------------------------------------------------ */
+/*  Toggle Switch                                                      */
+/* ------------------------------------------------------------------ */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.toggle-row .toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-row .spacer {
+  flex: 1;
+}
+
+.toggle-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 2px;
+  top: 2px;
+  background: var(--text-secondary);
+  border-radius: 50%;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Transcript                                                         */
+/* ------------------------------------------------------------------ */
+.transcript-section {
+  margin-top: 24px;
+}
+
+.transcript {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 16px;
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.transcript:empty::after {
+  content: "Conversation transcript will appear here...";
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.transcript .entry {
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(75, 85, 99, 0.4);
+}
+
+.transcript .entry:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.transcript .entry .role {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.transcript .entry .role.user { color: var(--accent); }
+.transcript .entry .role.assistant { color: #8b5cf6; }
+
+.transcript .entry .text {
+  color: var(--text-primary);
+}
+
+.transcript .entry .text.placeholder {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Feedback Messages                                                  */
+/* ------------------------------------------------------------------ */
+.error-msg {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(239,68,68,0.1);
+  color: var(--error);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Footer                                                             */
+/* ------------------------------------------------------------------ */
+.divider {
+  margin: 24px 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+.footer-links {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.footer-links a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.footer-links a:hover { text-decoration: underline; }
+
+/* Hidden audio element for WebRTC playback */
+audio { display: none; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo">Amplifier Voice</div>
+  <p class="tagline">Talk to your AI assistant</p>
+
+  <div class="status-bar">
+    <span class="status-dot" id="statusDot"></span>
+    <span class="status-text" id="statusText">Checking service...</span>
+  </div>
+
+  <div class="mic-area">
+    <div class="mic-ring" id="micRing">
+      <span class="mic-icon" id="micIcon">&#x1F3A4;</span>
+    </div>
+  </div>
+
+  <button class="btn-voice" id="voiceBtn" disabled>
+    Start Conversation
+  </button>
+
+  <div id="feedback"></div>
+
+  <div class="transcript-section">
+    <div class="toggle-row">
+      <div class="toggle-group">
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggleTranscript" checked>
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label" onclick="document.getElementById('toggleTranscript').click()">Show transcript</span>
+      </div>
+      <span class="spacer"></span>
+      <div class="toggle-group" id="userMessagesGroup">
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggleUserMessages">
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label" onclick="document.getElementById('toggleUserMessages').click()">Show your messages</span>
+      </div>
+    </div>
+    <div id="transcriptPanel">
+      <div class="transcript" id="transcript"></div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="footer-links">
+    <a href="/">Back to Amplifier</a>
+  </div>
+</div>
+
+<!-- Hidden audio element for WebRTC playback -->
+<audio id="remoteAudio" autoplay></audio>
+
+<script>
+/* ================================================================== */
+/*  Amplifier Voice - Vanilla JS WebRTC Client                         */
+/* ================================================================== */
+
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const micRing = document.getElementById('micRing');
+const voiceBtn = document.getElementById('voiceBtn');
+const feedback = document.getElementById('feedback');
+const transcript = document.getElementById('transcript');
+const remoteAudio = document.getElementById('remoteAudio');
+const toggleTranscript = document.getElementById('toggleTranscript');
+const toggleUserMessages = document.getElementById('toggleUserMessages');
+const transcriptPanel = document.getElementById('transcriptPanel');
+const userMessagesGroup = document.getElementById('userMessagesGroup');
+
+// Base path for API calls (works when mounted at /apps/voice/)
+const BASE = window.location.pathname.replace(/\/$/, '');
+
+let peerConnection = null;
+let localStream = null;
+let dataChannel = null;
+let isConnected = false;
+
+/* ------------------------------------------------------------------ */
+/*  Transcript toggle handlers                                         */
+/* ------------------------------------------------------------------ */
+toggleTranscript.addEventListener('change', function() {
+  transcriptPanel.style.display = this.checked ? '' : 'none';
+  userMessagesGroup.style.display = this.checked ? '' : 'none';
+});
+
+toggleUserMessages.addEventListener('change', function() {
+  const show = this.checked;
+  transcript.querySelectorAll('.entry[data-role="user"]').forEach(function(el) {
+    el.style.display = show ? '' : 'none';
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Status check on load                                               */
+/* ------------------------------------------------------------------ */
+async function checkStatus() {
+  try {
+    const res = await fetch(BASE + '/api/status');
+    const data = await res.json();
+
+    if (data.api_key_set) {
+      statusDot.className = 'status-dot ready';
+      statusText.textContent = 'Ready - ' + data.model + ' (' + data.voice + ')';
+      voiceBtn.disabled = false;
+    } else {
+      statusDot.className = 'status-dot error';
+      statusText.textContent = data.message || 'API key not configured';
+      voiceBtn.disabled = true;
+    }
+  } catch (err) {
+    statusDot.className = 'status-dot error';
+    statusText.textContent = 'Cannot reach voice service';
+    voiceBtn.disabled = true;
+  }
+}
+
+checkStatus();
+
+/* ------------------------------------------------------------------ */
+/*  Button handler                                                     */
+/* ------------------------------------------------------------------ */
+voiceBtn.addEventListener('click', async () => {
+  if (isConnected) {
+    disconnect();
+  } else {
+    await connect();
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/*  Connect: session -> mic -> WebRTC -> SDP exchange                  */
+/* ------------------------------------------------------------------ */
+async function connect() {
+  voiceBtn.disabled = true;
+  voiceBtn.innerHTML = '<span class="spinner"></span> Connecting...';
+  feedback.innerHTML = '';
+  transcript.innerHTML = '';
+  currentAssistantEntry = null;
+  pendingUserEntry = null;
+  statusDot.className = 'status-dot connecting';
+  statusText.textContent = 'Connecting...';
+
+  try {
+    // 1. Get ephemeral token from our backend
+    const sessionRes = await fetch(BASE + '/session');
+    if (!sessionRes.ok) {
+      const err = await sessionRes.json().catch(() => ({}));
+      throw new Error(err.error || 'Session creation failed: ' + sessionRes.status);
+    }
+    const sessionData = await sessionRes.json();
+    const ephemeralToken = sessionData.client_secret && sessionData.client_secret.value;
+    if (!ephemeralToken) {
+      throw new Error('No client_secret in session response');
+    }
+
+    // 2. Get microphone access
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+
+    // 3. Create RTCPeerConnection
+    peerConnection = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+
+    // Add local audio track
+    localStream.getTracks().forEach(function(track) {
+      peerConnection.addTrack(track, localStream);
+    });
+
+    // Handle remote audio track
+    peerConnection.ontrack = function(event) {
+      if (event.streams && event.streams[0]) {
+        remoteAudio.srcObject = event.streams[0];
+        remoteAudio.play().catch(function(e) {
+          console.error('Audio play error:', e);
+        });
+      }
+    };
+
+    // Create data channel for OpenAI events
+    dataChannel = peerConnection.createDataChannel('oai-events', { ordered: true });
+
+    dataChannel.onopen = function() {
+      console.log('[Voice] Data channel opened');
+      isConnected = true;
+      statusDot.className = 'status-dot active';
+      statusText.textContent = 'Connected - listening...';
+      micRing.className = 'mic-ring active';
+      voiceBtn.className = 'btn-voice end';
+      voiceBtn.textContent = 'End Conversation';
+      voiceBtn.disabled = false;
+    };
+
+    dataChannel.onmessage = function(event) {
+      handleDataChannelMessage(event.data);
+    };
+
+    dataChannel.onclose = function() {
+      console.log('[Voice] Data channel closed');
+      if (isConnected) {
+        disconnect();
+        statusText.textContent = 'Session ended by server';
+      }
+    };
+
+    dataChannel.onerror = function(err) {
+      console.error('[Voice] Data channel error:', err);
+    };
+
+    // Monitor connection state
+    peerConnection.onconnectionstatechange = function() {
+      console.log('[Voice] Connection state:', peerConnection.connectionState);
+      if (peerConnection.connectionState === 'failed') {
+        feedback.innerHTML = '<div class="error-msg">Connection failed. Please try again.</div>';
+        disconnect();
+      }
+    };
+
+    // 4. Create SDP offer
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    // Wait for ICE gathering
+    await waitForIce(peerConnection);
+
+    // 5. Exchange SDP with OpenAI via our backend
+    const sdpRes = await fetch(BASE + '/sdp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/sdp',
+        'Authorization': 'Bearer ' + ephemeralToken
+      },
+      body: peerConnection.localDescription.sdp
+    });
+
+    if (!sdpRes.ok) {
+      throw new Error('SDP exchange failed: ' + sdpRes.status);
+    }
+
+    // 6. Set remote SDP answer
+    const answerSdp = await sdpRes.text();
+    await peerConnection.setRemoteDescription(
+      new RTCSessionDescription({ type: 'answer', sdp: answerSdp })
+    );
+
+    console.log('[Voice] WebRTC connected');
+
+  } catch (err) {
+    console.error('[Voice] Connection error:', err);
+    feedback.innerHTML = '<div class="error-msg">' + esc(err.message) + '</div>';
+    disconnect();
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Disconnect and cleanup                                             */
+/* ------------------------------------------------------------------ */
+function disconnect() {
+  isConnected = false;
+
+  if (dataChannel) {
+    dataChannel.close();
+    dataChannel = null;
+  }
+
+  if (localStream) {
+    localStream.getTracks().forEach(function(t) { t.stop(); });
+    localStream = null;
+  }
+
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+
+  remoteAudio.srcObject = null;
+
+  micRing.className = 'mic-ring';
+  voiceBtn.className = 'btn-voice';
+  voiceBtn.textContent = 'Start Conversation';
+  voiceBtn.disabled = false;
+  statusDot.className = 'status-dot ready';
+  statusText.textContent = 'Disconnected';
+}
+
+/* ------------------------------------------------------------------ */
+/*  Handle data channel messages (transcripts, events)                 */
+/* ------------------------------------------------------------------ */
+function handleDataChannelMessage(raw) {
+  try {
+    const msg = JSON.parse(raw);
+    const type = msg.type || '';
+
+    // User speech transcript (fills the placeholder created on speech_started)
+    if (type === 'conversation.item.input_audio_transcription.completed') {
+      fillUserPlaceholder(msg.transcript || '');
+      micRing.className = 'mic-ring active';
+    }
+
+    // Assistant text response (delta)
+    if (type === 'response.audio_transcript.delta') {
+      appendAssistantDelta(msg.delta || '');
+    }
+
+    // Assistant text response complete
+    if (type === 'response.audio_transcript.done') {
+      finalizeAssistantEntry();
+    }
+
+    // Visual feedback: user is speaking + create placeholder for transcript
+    if (type === 'input_audio_buffer.speech_started') {
+      micRing.className = 'mic-ring listening';
+      createUserPlaceholder();
+    }
+
+    if (type === 'input_audio_buffer.speech_stopped') {
+      micRing.className = 'mic-ring active';
+    }
+
+    // Error from OpenAI
+    if (type === 'error') {
+      console.error('[Voice] OpenAI error:', msg);
+      const detail = (msg.error && msg.error.message) || 'Unknown error';
+      feedback.innerHTML = '<div class="error-msg">OpenAI: ' + esc(detail) + '</div>';
+    }
+
+  } catch (e) {
+    // Non-JSON message, ignore
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Transcript helpers                                                 */
+/* ------------------------------------------------------------------ */
+let currentAssistantEntry = null;
+let pendingUserEntry = null;
+
+function createUserPlaceholder() {
+  // Reserve a slot now so the user message appears above the assistant reply
+  pendingUserEntry = document.createElement('div');
+  pendingUserEntry.className = 'entry';
+  pendingUserEntry.setAttribute('data-role', 'user');
+  pendingUserEntry.innerHTML = '<div class="role user">you</div>'
+    + '<div class="text placeholder">...</div>';
+  if (!toggleUserMessages.checked) {
+    pendingUserEntry.style.display = 'none';
+  }
+  transcript.appendChild(pendingUserEntry);
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+function fillUserPlaceholder(text) {
+  if (!text.trim()) {
+    // Empty transcript - remove the placeholder
+    if (pendingUserEntry) {
+      pendingUserEntry.remove();
+      pendingUserEntry = null;
+    }
+    return;
+  }
+  if (pendingUserEntry) {
+    // Fill the existing placeholder
+    var textEl = pendingUserEntry.querySelector('.text');
+    textEl.textContent = text;
+    textEl.classList.remove('placeholder');
+    pendingUserEntry = null;
+  } else {
+    // No placeholder (edge case) - append normally
+    addTranscript('user', text);
+  }
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+function addTranscript(role, text) {
+  if (!text.trim()) return;
+  const entry = document.createElement('div');
+  entry.className = 'entry';
+  entry.setAttribute('data-role', role);
+  entry.innerHTML = '<div class="role ' + role + '">' + role + '</div>'
+    + '<div class="text">' + esc(text) + '</div>';
+  if (role === 'user' && !toggleUserMessages.checked) {
+    entry.style.display = 'none';
+  }
+  transcript.appendChild(entry);
+  transcript.scrollTop = transcript.scrollHeight;
+  currentAssistantEntry = null;
+}
+
+function appendAssistantDelta(delta) {
+  if (!currentAssistantEntry) {
+    currentAssistantEntry = document.createElement('div');
+    currentAssistantEntry.className = 'entry';
+    currentAssistantEntry.setAttribute('data-role', 'assistant');
+    currentAssistantEntry.innerHTML = '<div class="role assistant">assistant</div>'
+      + '<div class="text"></div>';
+    transcript.appendChild(currentAssistantEntry);
+  }
+  const textEl = currentAssistantEntry.querySelector('.text');
+  textEl.textContent += delta;
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+function finalizeAssistantEntry() {
+  currentAssistantEntry = null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Utilities                                                          */
+/* ------------------------------------------------------------------ */
+function esc(str) {
+  if (str == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(str);
+  return d.innerHTML;
+}
+
+function waitForIce(pc, timeout) {
+  timeout = timeout || 2000;
+  if (pc.iceGatheringState === 'complete') return Promise.resolve();
+  return new Promise(function(resolve) {
+    pc.onicegatheringstatechange = function() {
+      if (pc.iceGatheringState === 'complete') resolve();
+    };
+    setTimeout(resolve, timeout);
+  });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "amplifier-distro"
+version = "0.2.0"
+description = "Amplifier Experience Server - web chat, Slack, voice, and more"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Sam Schillace" }]
+
+dependencies = [
+    "click>=8.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.20.0",
+    "httpx>=0.24.0",
+    "python-multipart>=0.0.6",
+    "amplifier-foundation @ git+https://github.com/microsoft/amplifier-foundation",
+]
+
+[project.optional-dependencies]
+# Slack bridge with Socket Mode support
+slack = [
+    "slack-bolt>=1.18.0",
+    "slack-sdk>=3.26.0",
+    "aiohttp>=3.9.0",
+]
+# Development and testing
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.27",
+]
+# All optional features
+all = [
+    "amplifier-distro[slack]",
+]
+
+[project.scripts]
+amp-distro = "amplifier_distro.cli:main"
+amp-distro-server = "amplifier_distro.server.cli:serve"
+
+# -- Packaging Boundary ----------------------------------------
+# Only src/ is packaged. Everything else in the repo (planning/,
+# notes/, Dockerfile.dev, INSTRUCTIONS.md, etc.) is working files
+# for development and does NOT ship to users.
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+amplifier_distro = ["**/*.html"]
+
+# -- Code Quality ----------------------------------------------
+[tool.ruff]
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C4", "UP", "BLE", "S", "SIM", "TRY", "RUF", "PERF"]
+ignore = [
+    "S101",    # assert used (fine in non-web code and tests)
+    "S104",    # binding to all interfaces (intentional for server)
+    "S603",    # subprocess without shell=True (we validate inputs)
+    "S607",    # partial path to executable (acceptable for gh, git, etc.)
+    "TRY003",  # long exception messages are more readable inline
+    "TRY300",  # return-in-try is fine for guard clauses
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S106", "S108", "BLE001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = ["slow: marks tests as slow"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+include = ["src"]
+venvPath = "."
+venv = ".venv"

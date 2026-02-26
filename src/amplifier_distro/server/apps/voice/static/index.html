@@ -1,0 +1,1706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amplifier Voice</title>
+<script src="/apps/voice/static/vendor.js"></script>
+<style>
+/* ------------------------------------------------------------------ */
+/*  CSS: dark theme, system-ui font, flex column layout, 900px max     */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #1a1a1a;
+  color: #f0f0f0;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 24px 16px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  App container                                                       */
+/* ------------------------------------------------------------------ */
+#app {
+  width: 100%;
+  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Header                                                             */
+/* ------------------------------------------------------------------ */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-bottom: 1px solid #333;
+}
+
+.app-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #f0f0f0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Status badge                                                       */
+/* ------------------------------------------------------------------ */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.status-badge.idle {
+  background: #2a2a2a;
+  color: #888;
+  border-color: #333;
+}
+
+.status-badge.connecting {
+  background: #2a2200;
+  color: #f59e0b;
+  border-color: #5a4000;
+}
+
+.status-badge.connected {
+  background: #002a12;
+  color: #22c55e;
+  border-color: #005025;
+}
+
+.status-badge.disconnected {
+  background: #2a0000;
+  color: #ef4444;
+  border-color: #500000;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-badge.connecting .status-dot {
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Error banner                                                       */
+/* ------------------------------------------------------------------ */
+.error-banner {
+  background: #2a0000;
+  border: 1px solid #500000;
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #ef4444;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Transcript                                                         */
+/* ------------------------------------------------------------------ */
+.transcript-container {
+  flex: 1;
+  min-height: 300px;
+  max-height: 500px;
+  overflow-y: auto;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.transcript-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #555;
+  font-size: 14px;
+  font-style: italic;
+}
+
+.message-bubble {
+  display: flex;
+  flex-direction: column;
+  max-width: 72%;
+}
+
+.message-bubble.user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.message-bubble.assistant {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.bubble-label {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 4px;
+  text-transform: capitalize;
+}
+
+.bubble-text {
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.message-bubble.user .bubble-text {
+  background: #1d4ed8;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.message-bubble.assistant .bubble-text {
+  background: #222;
+  color: #e5e5e5;
+  border: 1px solid #333;
+  border-bottom-left-radius: 4px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Controls                                                           */
+/* ------------------------------------------------------------------ */
+.controls {
+  display: flex;
+  gap: 12px;
+}
+
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  flex: 1;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-start {
+  background: #2563eb;
+  color: #fff;
+}
+
+.btn-start:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.btn-disconnect {
+  background: #dc2626;
+  color: #fff;
+}
+
+.btn-disconnect:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Pause-replies banner / muted badge  (Task 5.4)                    */
+/* ------------------------------------------------------------------ */
+.pause-banner {
+  background: #2a1800;
+  border: 1px solid #5a3800;
+  border-radius: 8px;
+  padding: 10px 16px;
+  color: #f59e0b;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.muted-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #2a0000;
+  color: #ef4444;
+  border: 1px solid #500000;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Connection Health Panel  (Task 5.5)                               */
+/* ------------------------------------------------------------------ */
+.health-panel {
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  background: #111;
+  overflow: hidden;
+}
+
+.health-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: #aaa;
+  background: #1a1a1a;
+  border: none;
+  width: 100%;
+  text-align: left;
+}
+
+.health-panel-header:hover {
+  background: #222;
+  color: #ddd;
+}
+
+.health-panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.health-panel-body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.health-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.health-label {
+  color: #666;
+  width: 130px;
+  flex-shrink: 0;
+}
+
+.health-value {
+  font-variant-numeric: tabular-nums;
+  font-family: 'SF Mono', 'Consolas', 'Menlo', monospace;
+}
+
+.health-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.warning-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.warning-badge.stale {
+  background: #2a1800;
+  color: #f59e0b;
+  border: 1px solid #5a3800;
+}
+
+.warning-badge.idle {
+  background: #1a1a2a;
+  color: #818cf8;
+  border: 1px solid #3730a3;
+}
+
+.warning-badge.session_limit {
+  background: #2a0000;
+  color: #ef4444;
+  border: 1px solid #500000;
+}
+
+.health-strategy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.health-strategy label {
+  color: #666;
+}
+
+.health-strategy select {
+  background: #222;
+  color: #ddd;
+  border: 1px solid #333;
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Session Picker  (Task 5.6)                                        */
+/* ------------------------------------------------------------------ */
+.session-picker {
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #111;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-picker-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #aaa;
+  margin-bottom: 4px;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  gap: 12px;
+}
+
+.session-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.session-title {
+  font-size: 13px;
+  color: #e5e5e5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-status {
+  font-size: 11px;
+  color: #666;
+  text-transform: capitalize;
+}
+
+.session-date {
+  font-size: 11px;
+  color: #555;
+}
+
+.btn-resume {
+  background: #7c3aed;
+  color: #fff;
+  padding: 6px 14px;
+  font-size: 13px;
+  flex: none;
+}
+
+.btn-resume:hover:not(:disabled) {
+  background: #6d28d9;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Stop Button  (Task 5.6)                                           */
+/* ------------------------------------------------------------------ */
+.btn-stop {
+  background: #dc2626;
+  color: #fff;
+}
+
+.btn-stop:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.btn-stop.cancelling {
+  background: #7f1d1d;
+  cursor: wait;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Microphone Controls  (Task 5.6)                                   */
+/* ------------------------------------------------------------------ */
+.mic-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-mic {
+  background: #222;
+  color: #e5e5e5;
+  border: 1px solid #333;
+  flex: 1;
+}
+
+.btn-mic:hover:not(:disabled) {
+  background: #333;
+}
+
+.btn-mic.muted {
+  background: #2a0000;
+  color: #ef4444;
+  border-color: #500000;
+}
+
+.btn-pause {
+  background: #222;
+  color: #e5e5e5;
+  border: 1px solid #333;
+  flex: 1;
+}
+
+.btn-pause:hover:not(:disabled) {
+  background: #333;
+}
+
+.btn-pause.paused {
+  background: #2a1800;
+  color: #f59e0b;
+  border-color: #5a3800;
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // Pull globals from vendor.js
+  const { h, render, Fragment } = window.preact;
+  const { useState, useEffect, useRef, useCallback } = window.preactHooks;
+  const html = window.html;
+
+  // -------------------------------------------------------------------------
+  // useWebRTC({ onMessage, onStateChange })
+  // -------------------------------------------------------------------------
+
+  function useWebRTC({ onMessage, onStateChange }) {
+    const [rtcState, setRtcState] = useState('idle');
+    const pcRef = useRef(null);
+    const dcRef = useRef(null);
+    const tokenRef = useRef(null);
+    const streamRef = useRef(null);  // holds MediaStream for track cleanup
+    const audioRef = useRef(null);   // holds <audio> element for DOM cleanup
+
+    // Helper: update both local state and notify parent
+    const updateState = useCallback((state) => {
+      setRtcState(state);
+      if (onStateChange) onStateChange(state);
+    }, [onStateChange]);
+
+    // -----------------------------------------------------------------------
+    // connect()
+    // -----------------------------------------------------------------------
+    const connect = useCallback(async () => {
+      updateState('connecting');
+
+      // Step 1: Fetch ephemeral token from backend
+      let token;
+      try {
+        const resp = await fetch('/apps/voice/session');
+        if (!resp.ok) throw new Error(`Session token fetch failed: ${resp.status}`);
+        const data = await resp.json();
+        token = data.value;
+      } catch (err) {
+        console.error('[useWebRTC] Failed to fetch session token:', err);
+        updateState('disconnected');
+        throw err;
+      }
+      tokenRef.current = token;
+
+      // Step 2: Create RTCPeerConnection with STUN
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      });
+      pcRef.current = pc;
+
+      // Step 3: Get user microphone audio and add track
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (err) {
+        console.error('[useWebRTC] getUserMedia failed:', err);
+        pc.close();
+        updateState('disconnected');
+        throw err;
+      }
+      streamRef.current = stream;  // store so disconnect() can stop tracks
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      // Step 4: Play incoming audio tracks from OpenAI
+      pc.ontrack = (event) => {
+        if (audioRef.current) audioRef.current.remove(); // replace any prior element
+        const audio = document.createElement('audio');
+        audio.autoplay = true;
+        audio.srcObject = event.streams[0] || new MediaStream([event.track]);
+        document.body.appendChild(audio);
+        audioRef.current = audio;
+      };
+
+      // Step 5: Create data channel for OpenAI events
+      const dc = pc.createDataChannel('oai-events');
+      dcRef.current = dc;
+
+      // Step 6 & 7: On data channel open — two-stage VAD setup
+      dc.onopen = () => {
+        // Stage 1: server_vad with noise reduction + transcription
+        const stage1 = {
+          type: 'session.update',
+          session: {
+            turn_detection: {
+              type: 'server_vad',
+              threshold: 0.5,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 500,
+            },
+            noise_reduction: { type: 'near_field' },
+            input_audio_transcription: {
+              model: 'gpt-4o-transcribe',
+            },
+          },
+        };
+        dc.send(JSON.stringify(stage1));
+
+        // Stage 2: semantic_vad — must be sent AFTER initial server_vad
+        // (GA API constraint: semantic_vad cannot be the initial type)
+        setTimeout(() => {
+          if (dc.readyState !== 'open') return;
+          const stage2 = {
+            type: 'session.update',
+            session: {
+              turn_detection: {
+                type: 'semantic_vad',
+                eagerness: 'low',
+                create_response: false,
+                interrupt_response: true,
+              },
+            },
+          };
+          dc.send(JSON.stringify(stage2));
+        }, 100);
+      };
+
+      // Step 8: Forward data channel messages to caller
+      dc.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (onMessage) onMessage(msg);
+        } catch (err) {
+          console.warn('[useWebRTC] Failed to parse data channel message:', err);
+        }
+      };
+
+      // Step 9: Track ICE connection state changes
+      pc.oniceconnectionstatechange = () => {
+        const iceState = pc.iceConnectionState;
+        console.debug('[useWebRTC] ICE connection state:', iceState);
+        if (iceState === 'connected' || iceState === 'completed') {
+          updateState('connected');
+        } else if (iceState === 'disconnected' || iceState === 'failed' || iceState === 'closed') {
+          updateState('disconnected');
+        }
+      };
+
+      // Step 10: SDP exchange
+      // Create offer and set as local description
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // Wait for ICE gathering to complete (max 2 seconds)
+      await new Promise((resolve) => {
+        if (pc.iceGatheringState === 'complete') {
+          resolve();
+          return;
+        }
+        const timer = setTimeout(resolve, 2000);
+        pc.onicegatheringstatechange = () => {
+          if (pc.iceGatheringState === 'complete') {
+            clearTimeout(timer);
+            resolve();
+          }
+        };
+      });
+
+      // POST SDP offer to backend, get SDP answer
+      let sdpAnswer;
+      try {
+        const sdpResp = await fetch('/apps/voice/sdp', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/sdp',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: pc.localDescription.sdp,
+        });
+        if (!sdpResp.ok) throw new Error(`SDP exchange failed: ${sdpResp.status}`);
+        sdpAnswer = await sdpResp.text();
+      } catch (err) {
+        console.error('[useWebRTC] SDP exchange failed:', err);
+        pc.close();
+        updateState('disconnected');
+        throw err;
+      }
+
+      // Set remote description with the SDP answer
+      await pc.setRemoteDescription({ type: 'answer', sdp: sdpAnswer });
+    }, [onMessage, updateState]);
+
+    // -----------------------------------------------------------------------
+    // disconnect()
+    // -----------------------------------------------------------------------
+    const disconnect = useCallback(() => {
+      if (dcRef.current) {
+        try { dcRef.current.close(); } catch (_) { /* ignore: already closed */ }
+        dcRef.current = null;
+      }
+      if (pcRef.current) {
+        try { pcRef.current.close(); } catch (_) { /* ignore: already closed */ }
+        pcRef.current = null;
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      if (audioRef.current) {
+        audioRef.current.remove();
+        audioRef.current = null;
+      }
+      tokenRef.current = null;
+      updateState('idle');
+    }, [updateState]);
+
+    // -----------------------------------------------------------------------
+    // sendDataChannelMessage(msg)
+    // -----------------------------------------------------------------------
+    const sendDataChannelMessage = useCallback((msg) => {
+      const dc = dcRef.current;
+      if (dc && dc.readyState === 'open') {
+        dc.send(JSON.stringify(msg));
+      } else {
+        console.warn('[useWebRTC] Data channel not open, cannot send message');
+      }
+    }, []);
+
+    return { rtcState, connect, disconnect, sendDataChannelMessage, dcRef, streamRef };
+  }
+
+  // -------------------------------------------------------------------------
+  // useChatMessages({ sendDataChannelMessage, sessionId })   Task 5.3
+  // -------------------------------------------------------------------------
+
+  function useChatMessages({ sendDataChannelMessage, sessionId, checkTranscript }) {
+    const [messages, setMessages] = useState([]);
+    const [responseInProgress, setResponseInProgress] = useState(false);
+
+    // Refs — mutations without triggering rerenders
+    const pendingAnnouncements = useRef([]);
+    const messageRefs = useRef({});
+    const currentStreamingId = useRef(null);
+    // Shadow ref so async callbacks always see the current responseInProgress value
+    const responseInProgressRef = useRef(false);
+
+    // Keep state and ref in sync together
+    const setRip = useCallback((val) => {
+      responseInProgressRef.current = val;
+      setResponseInProgress(val);
+    }, []);
+
+    // addUserMessage(transcript, itemId): add a user bubble
+    const addUserMessage = useCallback((transcript, itemId) => {
+      const id = itemId || ('user-' + Date.now());
+      setMessages((prev) => [...prev, { id, role: 'user', content: transcript }]);
+    }, []);
+
+    // startAssistantMessage(): add an empty assistant bubble, set currentStreamingId
+    const startAssistantMessage = useCallback(() => {
+      const id = 'asst-' + Date.now();
+      currentStreamingId.current = id;
+      setMessages((prev) => [...prev, { id, role: 'assistant', content: '' }]);
+    }, []);
+
+    // clearMessages(): reset all chat state (called on disconnect)
+    const clearMessages = useCallback(() => {
+      setMessages([]);
+      setRip(false);
+      pendingAnnouncements.current = [];
+      currentStreamingId.current = null;
+      messageRefs.current = {};
+    }, [setRip]);
+
+    // handleDataChannelEvent(event) async — main OpenAI Realtime event dispatcher
+    const handleDataChannelEvent = useCallback(async (event) => {
+      const { type } = event;
+      console.debug('[useChatMessages] event:', type);
+
+      // VAD speech detection — no UI change needed
+      if (type === 'input_audio_buffer.speech_started') return;
+
+      // User finished speaking — show transcription, wake-word check, trigger reply if idle
+      if (type === 'conversation.item.input_audio_transcription.completed') {
+        const transcript = event.transcript || '';
+        addUserMessage(transcript, event.item_id);
+        // Task 5.4: run wake-word detection before auto-respond decision
+        if (checkTranscript) checkTranscript(transcript);
+        if (!responseInProgressRef.current) {
+          sendDataChannelMessage({ type: 'response.create' });
+        }
+        return;
+      }
+
+      // Streaming assistant text — DIRECT DOM mutation, zero Preact rerenders
+      if (type === 'response.audio_transcript.delta') {
+        const id = currentStreamingId.current;
+        if (id && messageRefs.current[id]) {
+          messageRefs.current[id].textContent += event.delta || '';
+        }
+        return;
+      }
+
+      // Streaming finished — commit final transcript to state
+      if (type === 'response.audio_transcript.done') {
+        const id = currentStreamingId.current;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === id ? { ...m, content: event.transcript || '' } : m))
+        );
+        currentStreamingId.current = null;
+        return;
+      }
+
+      // Response cycle started
+      if (type === 'response.created') {
+        setRip(true);
+        startAssistantMessage();
+        return;
+      }
+
+      // Response cycle completed — flush any queued follow-ups
+      if (type === 'response.done') {
+        setRip(false);
+        const pending = pendingAnnouncements.current.splice(0);
+        if (pending.length > 0) {
+          sendDataChannelMessage({ type: 'response.create' });
+        }
+        return;
+      }
+
+      // Tool call from the model
+      if (type === 'response.output_item.added') {
+        const item = event.item;
+        if (!item || item.type !== 'function_call') return;
+
+        const toolName = item.name;
+        const callId = item.call_id;
+        const args = item.arguments || '{}';
+
+        // Browser-side tools — TODO 5.4: handle pause_replies / resume_replies
+        if (toolName === 'pause_replies' || toolName === 'resume_replies') return;
+
+        // Execute tool on the server
+        let output;
+        try {
+          const resp = await fetch('/apps/voice/tools/execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tool_name: toolName,
+              arguments: args,
+              call_id: callId,
+              session_id: sessionId,
+            }),
+          });
+          const data = await resp.json();
+          output = JSON.stringify(data);
+        } catch (err) {
+          console.error('[useChatMessages] Tool execution failed:', err);
+          output = JSON.stringify({ error: String(err) });
+        }
+
+        // Return the tool result to the model via function_call_output
+        sendDataChannelMessage({
+          type: 'conversation.item.create',
+          item: { type: 'function_call_output', call_id: callId, output },
+        });
+
+        // Trigger the next assistant turn, or queue it until response.done
+        if (!responseInProgressRef.current) {
+          sendDataChannelMessage({ type: 'response.create' });
+        } else {
+          pendingAnnouncements.current.push({ type: 'response.create' });
+        }
+      }
+    }, [sendDataChannelMessage, sessionId, addUserMessage, startAssistantMessage, setRip]);
+
+    return { messages, responseInProgress, messageRefs, handleDataChannelEvent, clearMessages };
+  }
+
+  // -------------------------------------------------------------------------
+  // ConnectionHealthManager  (Task 5.5) — pure logic, no UI
+  // -------------------------------------------------------------------------
+
+  class ConnectionHealthManager {
+    /**
+     * @param {{ strategy?: 'manual'|'auto_immediate'|'auto_delayed'|'proactive' }} options
+     */
+    constructor({ strategy = 'manual' } = {}) {
+      this.strategy = strategy;
+      this.reconnectCount = 0;
+      this.disconnectHistory = [];
+      this._sessionStart = null;
+      this._lastEventTime = null;
+      this._lastSpeechTime = null;
+    }
+
+    /** Call when a new session starts (or reconnects). */
+    startSession() {
+      const now = Date.now();
+      this._sessionStart = now;
+      this._lastEventTime = now;
+      this._lastSpeechTime = now;
+    }
+
+    /** Record that a realtime event was received (heartbeat for staleness). */
+    recordEvent() {
+      this._lastEventTime = Date.now();
+    }
+
+    /** Record that the user or assistant produced speech. */
+    recordSpeech() {
+      this._lastSpeechTime = Date.now();
+    }
+
+    /**
+     * Returns a snapshot of current session health.
+     * @returns {{
+     *   sessionAge: number|null,
+     *   timeSinceEvent: number,
+     *   timeSinceSpeech: number,
+     *   warnings: string[],
+     *   reconnectCount: number,
+     * }}
+     */
+    getStatus() {
+      const now = Date.now();
+      const sessionAge =
+        this._sessionStart !== null ? (now - this._sessionStart) / 1000 : null;
+      const timeSinceEvent =
+        this._lastEventTime !== null ? (now - this._lastEventTime) / 1000 : 0;
+      const timeSinceSpeech =
+        this._lastSpeechTime !== null ? (now - this._lastSpeechTime) / 1000 : 0;
+
+      const warnings = [];
+      if (timeSinceEvent > 30) warnings.push('stale');
+      if (timeSinceSpeech > 120) warnings.push('idle');
+      if (sessionAge !== null && sessionAge > 55 * 60) warnings.push('session_limit');
+
+      return { sessionAge, timeSinceEvent, timeSinceSpeech, warnings, reconnectCount: this.reconnectCount };
+    }
+
+    /**
+     * Infer why the session disconnected.
+     * @param {number} sessionAge  Age in seconds at time of disconnect.
+     * @returns {'session_limit'|'idle_timeout'|'network_error'}
+     */
+    inferDisconnectReason(sessionAge) {
+      if (sessionAge >= 58 * 60) return 'session_limit';
+      const timeSinceSpeech =
+        this._lastSpeechTime !== null
+          ? (Date.now() - this._lastSpeechTime) / 1000
+          : Infinity;
+      if (timeSinceSpeech >= 120) return 'idle_timeout';
+      return 'network_error';
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // useConnectionHealth({ manager, onProactiveReconnect })   Task 5.5
+  // -------------------------------------------------------------------------
+
+  function useConnectionHealth({ manager, onProactiveReconnect }) {
+    const [status, setStatus] = useState(null);
+    const onProactiveRef = useRef(onProactiveReconnect);
+
+    // Keep ref current on every render so the interval callback sees latest fn
+    useEffect(() => {
+      onProactiveRef.current = onProactiveReconnect;
+    });
+
+    useEffect(() => {
+      if (!manager) return;
+
+      const tick = () => {
+        const s = manager.getStatus();
+        setStatus(s);
+
+        // Proactive strategy: trigger reconnect before the 60-min session limit
+        if (
+          s.warnings.includes('session_limit') &&
+          manager.strategy === 'proactive' &&
+          onProactiveRef.current
+        ) {
+          onProactiveRef.current();
+        }
+      };
+
+      // Immediate snapshot, then every 5 s
+      tick();
+      const id = setInterval(tick, 5000);
+      return () => clearInterval(id);
+    }, [manager]);
+
+    return status;
+  }
+
+  // -------------------------------------------------------------------------
+  // ConnectionHealthPanel({ status, strategy, onStrategyChange })   Task 5.5
+  // -------------------------------------------------------------------------
+
+  /** Format seconds as "Xm Ys" */
+  function fmtDuration(seconds) {
+    if (seconds == null) return '—';
+    const s = Math.floor(seconds);
+    const m = Math.floor(s / 60);
+    return `${m}m ${s % 60}s`;
+  }
+
+  function ConnectionHealthPanel({ status, strategy, onStrategyChange }) {
+    const [expanded, setExpanded] = useState(false);
+
+    if (!status) return null;
+
+    const { sessionAge, timeSinceEvent, reconnectCount, warnings } = status;
+
+    return html`
+      <div class="health-panel">
+        <button
+          class="health-panel-header"
+          onClick=${() => setExpanded((e) => !e)}
+          aria-expanded=${expanded}
+        >
+          <span class="health-panel-header-left">
+            <span>🩺 Connection Health</span>
+            ${warnings.length > 0 && html`
+              <span class="health-badges">
+                ${warnings.map((w) => html`<span key=${w} class=${'warning-badge ' + w}>${w.replace('_', ' ')}</span>`)}
+              </span>
+            `}
+          </span>
+          <span>${expanded ? '▲' : '▼'}</span>
+        </button>
+
+        ${expanded && html`
+          <div class="health-panel-body">
+            <div class="health-row">
+              <span class="health-label">Session age</span>
+              <span class="health-value">${fmtDuration(sessionAge)}</span>
+            </div>
+            <div class="health-row">
+              <span class="health-label">Last event</span>
+              <span class="health-value">${fmtDuration(timeSinceEvent)} ago</span>
+            </div>
+            <div class="health-row">
+              <span class="health-label">Reconnects</span>
+              <span class="health-value">${reconnectCount}</span>
+            </div>
+            <div class="health-strategy">
+              <label for="health-strategy-select">Strategy</label>
+              <select
+                id="health-strategy-select"
+                value=${strategy}
+                onChange=${(e) => onStrategyChange && onStrategyChange(e.target.value)}
+              >
+                <option value="manual">Manual</option>
+                <option value="auto_immediate">Auto immediate</option>
+                <option value="auto_delayed">Auto delayed (3s)</option>
+                <option value="proactive">Proactive (55min)</option>
+              </select>
+            </div>
+          </div>
+        `}
+      </div>
+    `;
+  }
+
+  // -------------------------------------------------------------------------
+  // useMicrophoneControl({ sendDataChannelMessage })   Task 5.4
+  // -------------------------------------------------------------------------
+
+  function useMicrophoneControl({ sendDataChannelMessage }) {
+    const [muted, setMuted] = useState(false);
+    const [pauseReplies, setPauseReplies] = useState(false);
+    const streamRef = useRef(null);
+
+    // Store the mic MediaStream reference so toggleMute can reach audio tracks
+    const setMicStream = useCallback((stream) => {
+      streamRef.current = stream;
+    }, []);
+
+    // Toggle track.enabled on all audio tracks — hardware mic stays open,
+    // but audio is silenced at the track level
+    const toggleMute = useCallback(() => {
+      const stream = streamRef.current;
+      if (!stream) return;
+      const nextMuted = !muted;
+      stream.getAudioTracks().forEach((track) => { track.enabled = !nextMuted; });
+      setMuted(nextMuted);
+    }, [muted]);
+
+    // Pause: prevent the model from auto-responding (disable create_response)
+    const enterPauseReplies = useCallback(() => {
+      setPauseReplies(true);
+      sendDataChannelMessage({
+        type: 'session.update',
+        session: {
+          turn_detection: { type: 'semantic_vad', create_response: false },
+        },
+      });
+    }, [sendDataChannelMessage]);
+
+    // Resume: re-enable auto-responses
+    const exitPauseReplies = useCallback(() => {
+      setPauseReplies(false);
+      sendDataChannelMessage({
+        type: 'session.update',
+        session: {
+          turn_detection: { type: 'semantic_vad', create_response: true },
+        },
+      });
+    }, [sendDataChannelMessage]);
+
+    return { muted, pauseReplies, toggleMute, enterPauseReplies, exitPauseReplies, setMicStream };
+  }
+
+  // -------------------------------------------------------------------------
+  // useVoiceKeywords({ assistantName, onTriggerResponse, onPauseReplies,
+  //                    onResumeReplies, onMute, onUnmute })   Task 5.4
+  // -------------------------------------------------------------------------
+
+  function useVoiceKeywords({
+    assistantName,
+    onTriggerResponse,
+    onPauseReplies,
+    onResumeReplies,
+    onMute,
+    onUnmute,
+  }) {
+    const lastFiredRef = useRef(0);
+    const DEBOUNCE_MS = 2000;
+
+    const checkTranscript = useCallback((transcript) => {
+      const lower = transcript.toLowerCase();
+      const wakeWord = 'hey ' + (assistantName || 'amplifier').toLowerCase();
+      if (!lower.includes(wakeWord)) return;
+
+      // Debounce: ignore rapid repeat triggers within DEBOUNCE_MS
+      const now = Date.now();
+      if (now - lastFiredRef.current < DEBOUNCE_MS) return;
+
+      if (lower.includes('go ahead') || lower.includes('your turn')) {
+        lastFiredRef.current = now;
+        if (onTriggerResponse) onTriggerResponse();
+      } else if (lower.includes('pause replies')) {
+        lastFiredRef.current = now;
+        if (onPauseReplies) onPauseReplies();
+      } else if (lower.includes('resume')) {
+        lastFiredRef.current = now;
+        if (onResumeReplies) onResumeReplies();
+      } else if (lower.includes('unmute')) {
+        // 'unmute' must be checked before 'mute' to avoid false match
+        lastFiredRef.current = now;
+        if (onUnmute) onUnmute();
+      } else if (lower.includes('mute')) {
+        lastFiredRef.current = now;
+        if (onMute) onMute();
+      }
+    }, [assistantName, onTriggerResponse, onPauseReplies, onResumeReplies, onMute, onUnmute]);
+
+    return { checkTranscript };
+  }
+
+  // -------------------------------------------------------------------------
+  // useAmplifierEvents({ onEvent })   Task 5.6
+  // Opens an SSE stream to /apps/voice/events, logs events with icons,
+  // and calls onEvent(msg) for every non-heartbeat message.
+  // -------------------------------------------------------------------------
+
+  const AMPLIFIER_EVENT_ICONS = {
+    provider_request:  '🔼',
+    provider_response: '🔽',
+    tool_call:         '🔧',
+    tool_result:       '🔧',
+    tool_error:        '❌',
+    session_fork:      '🔀',
+    cancel_requested:  '🛑',
+    cancel_completed:  '✅',
+  };
+
+  function useAmplifierEvents({ onEvent }) {
+    // Use a ref so the EventSource is not recreated when onEvent changes
+    const onEventRef = useRef(onEvent);
+    useEffect(() => { onEventRef.current = onEvent; });
+
+    useEffect(() => {
+      const es = new EventSource('/apps/voice/events');
+
+      es.onmessage = (event) => {
+        let msg;
+        try { msg = JSON.parse(event.data); } catch (_) { return; }
+
+        // Skip heartbeat pings — they are not meaningful to the consumer
+        if (msg.type === 'heartbeat') return;
+
+        const icon = AMPLIFIER_EVENT_ICONS[msg.type] || '📨';
+        console.log(
+          `%c[Amplifier] ${icon} ${msg.type}`,
+          'color:#818cf8;font-weight:bold;',
+          msg,
+        );
+
+        if (onEventRef.current) onEventRef.current(msg);
+      };
+
+      es.onerror = (err) => {
+        console.warn('[useAmplifierEvents] SSE connection error:', err);
+      };
+
+      return () => { es.close(); };
+    }, []); // open once on mount, close on unmount
+  }
+
+  // -------------------------------------------------------------------------
+  // SessionPicker({ onResume })   Task 5.6
+  // Fetches /apps/voice/sessions, shows the last 5 with a Resume button
+  // (purple) for sessions that have not ended.
+  // Returns null when there are no sessions.
+  // -------------------------------------------------------------------------
+
+  function SessionPicker({ onResume }) {
+    const [sessions, setSessions] = useState(null);
+
+    useEffect(() => {
+      fetch('/apps/voice/sessions')
+        .then((r) => r.json())
+        .then((data) => {
+          const list = Array.isArray(data) ? data : (data.sessions || []);
+          setSessions(list);
+        })
+        .catch(() => setSessions([]));
+    }, []);
+
+    // Render nothing until loaded, or if empty
+    if (!sessions || sessions.length === 0) return null;
+
+    // Most-recent first, capped at 5
+    const last5 = sessions.slice().reverse().slice(0, 5);
+
+    return html`
+      <div class="session-picker">
+        <div class="session-picker-title">Previous Sessions</div>
+        ${last5.map((sess) => {
+          const sid    = sess.session_id || sess.id;
+          const title  = sess.title || sid;
+          const status = sess.status || 'unknown';
+          const date   = sess.created_at
+            ? new Date(sess.created_at).toLocaleString()
+            : '';
+          // Show Resume for any session not explicitly ended/completed;
+          // 'unknown' status is treated as resumable (API may not always set status)
+          const canResume = status !== 'ended' && status !== 'completed';
+
+          return html`
+            <div key=${sid} class="session-item">
+              <div class="session-info">
+                <span class="session-title">${title}</span>
+                <span class="session-status">${status}</span>
+                ${date && html`<span class="session-date">${date}</span>`}
+              </div>
+              ${canResume && html`
+                <button
+                  class="btn btn-resume"
+                  onClick=${() => onResume && onResume(sid)}
+                >Resume</button>
+              `}
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
+  // -------------------------------------------------------------------------
+  // StopButton({ sessionId, runningTools, onStop })   Task 5.6
+  // Single click  → graceful cancel (immediate:false)
+  // Double click (<400 ms) → hard cancel  (immediate:true)
+  // Label: 'Stop ({toolName})' while tool is running, 'Stopping...' during cancel.
+  // -------------------------------------------------------------------------
+
+  function StopButton({ sessionId, runningTools, onStop }) {
+    const [cancelling, setCancelling] = useState(false);
+    const lastClickRef = useRef(0);
+
+    const toolName = (runningTools && runningTools.length > 0) ? runningTools[0] : null;
+
+    const handleClick = useCallback(async () => {
+      const now = Date.now();
+      const isDoubleClick = (now - lastClickRef.current) < 400;
+      lastClickRef.current = now;
+
+      // Allow double-click escalation even if already cancelling
+      if (cancelling && !isDoubleClick) return;
+
+      const immediate = isDoubleClick;
+
+      setCancelling(true);
+      try {
+        await fetch('/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId, immediate }),
+        });
+        if (onStop) onStop();
+      } catch (err) {
+        console.error('[StopButton] Cancel request failed:', err);
+      } finally {
+        setCancelling(false);
+      }
+    }, [cancelling, sessionId, onStop]);
+
+    const label = cancelling
+      ? 'Stopping...'
+      : toolName
+        ? `Stop (${toolName})`
+        : 'Stop';
+
+    return html`
+      <button
+        class=${'btn btn-stop' + (cancelling ? ' cancelling' : '')}
+        onClick=${handleClick}
+        disabled=${!sessionId}
+        title="Click to stop gracefully · Double-click to stop immediately"
+      >
+        🛑 ${label}
+      </button>
+    `;
+  }
+
+  // -------------------------------------------------------------------------
+  // MicrophoneControls({ muted, pauseReplies, onToggleMute,
+  //                      onPauseReplies, onResumeReplies })   Task 5.6
+  // Two buttons: mic mute toggle (red when muted) and pause/resume toggle
+  // (amber when paused).
+  // -------------------------------------------------------------------------
+
+  function MicrophoneControls({ muted, pauseReplies, onToggleMute, onPauseReplies, onResumeReplies }) {
+    return html`
+      <div class="mic-controls">
+        <button
+          class=${'btn btn-mic' + (muted ? ' muted' : '')}
+          onClick=${onToggleMute}
+          title=${muted ? 'Unmute microphone' : 'Mute microphone'}
+        >
+          ${muted ? '🔇 Muted' : '🎙️ Mic'}
+        </button>
+        <button
+          class=${'btn btn-pause' + (pauseReplies ? ' paused' : '')}
+          onClick=${pauseReplies ? onResumeReplies : onPauseReplies}
+          title=${pauseReplies ? 'Resume replies' : 'Pause replies'}
+        >
+          ${pauseReplies ? '▶️ Resume' : '⏸️ Pause'}
+        </button>
+      </div>
+    `;
+  }
+
+  // -------------------------------------------------------------------------
+  // VoiceApp root component
+  // -------------------------------------------------------------------------
+
+  function VoiceApp() {
+    const [error, setError] = useState(null);
+    const [isConnecting, setIsConnecting] = useState(false);
+    const [sessionId, setSessionId] = useState(null);  // Task 5.3: session state
+    const transcriptEndRef = useRef(null);
+
+    // Task 5.5: connection health manager (stable across renders)
+    const healthManagerRef = useRef(null);
+    if (!healthManagerRef.current) {
+      healthManagerRef.current = new ConnectionHealthManager({ strategy: 'manual' });
+    }
+    const [healthStrategy, setHealthStrategy] = useState('manual');
+
+    // Task 5.6: track tools currently running (for StopButton label)
+    const [runningTools, setRunningTools] = useState([]);
+    const runningToolsRef = useRef([]);   // shadow ref for sync mutation
+
+    // Task 5.4: fetch assistant name on mount (default: 'Amplifier')
+    const [assistantName, setAssistantName] = useState('Amplifier');
+    useEffect(() => {
+      fetch('/api/status')
+        .then((r) => r.json())
+        .then((data) => { if (data.assistant_name) setAssistantName(data.assistant_name); })
+        .catch(() => { /* silent — keep default 'Amplifier' */ });
+    }, []);
+
+    // Task 5.5: poll connection health every 5s
+    const healthStatus = useConnectionHealth({
+      manager: healthManagerRef.current,
+      onProactiveReconnect: useCallback(() => {
+        console.debug('[VoiceApp] Proactive reconnect triggered by session_limit warning');
+        // TODO: implement proactive reconnect flow
+      }, []),
+    });
+
+    // Task 5.5: sync strategy state → manager whenever it changes
+    useEffect(() => {
+      healthManagerRef.current.strategy = healthStrategy;
+    }, [healthStrategy]);
+
+    // Stable message handler ref — breaks the circular hook dependency:
+    // useWebRTC.onMessage → useChatMessages.handleDataChannelEvent → sendDataChannelMessage
+    const msgHandlerRef = useRef(null);
+
+    // Task 5.5 + 5.6: wrap stable handler to record health events AND track running tools
+    const stableMsgHandler = useCallback((msg) => {
+      healthManagerRef.current.recordEvent();
+
+      // Record speech events (Task 5.5)
+      if (
+        msg.type === 'conversation.item.input_audio_transcription.completed' ||
+        msg.type === 'response.audio_transcript.done'
+      ) {
+        healthManagerRef.current.recordSpeech();
+      }
+
+      // Task 5.6: track which tools are running for StopButton
+      if (msg.type === 'response.output_item.added' && msg.item && msg.item.type === 'function_call') {
+        const updated = [...runningToolsRef.current, msg.item.name];
+        runningToolsRef.current = updated;
+        setRunningTools(updated);
+      }
+      if (msg.type === 'response.done') {
+        runningToolsRef.current = [];
+        setRunningTools([]);
+      }
+
+      if (msgHandlerRef.current) msgHandlerRef.current(msg);
+    }, []);
+
+    const handleStateChange = useCallback((state) => {
+      console.debug('[VoiceApp] RTC state changed:', state);  // Task 5.3
+    }, []);
+
+    const { rtcState, connect, disconnect, sendDataChannelMessage, streamRef } = useWebRTC({
+      onMessage: stableMsgHandler,
+      onStateChange: handleStateChange,
+    });
+
+    // Task 5.4: microphone mute + pause-replies control
+    const {
+      muted,
+      pauseReplies,
+      toggleMute,
+      enterPauseReplies,
+      exitPauseReplies,
+      setMicStream,
+    } = useMicrophoneControl({ sendDataChannelMessage });
+
+    // Task 5.4: keyword detection — wire actions to microphone/pause hooks
+    const { checkTranscript } = useVoiceKeywords({
+      assistantName,
+      onTriggerResponse: useCallback(
+        () => sendDataChannelMessage({ type: 'response.create' }),
+        [sendDataChannelMessage],
+      ),
+      onPauseReplies: enterPauseReplies,
+      onResumeReplies: exitPauseReplies,
+      onMute: toggleMute,
+      onUnmute: toggleMute,
+    });
+
+    const {
+      messages,
+      messageRefs,
+      handleDataChannelEvent,
+      clearMessages,
+    } = useChatMessages({ sendDataChannelMessage, sessionId, checkTranscript });
+
+    // Wire latest handler into stable ref on every render (ref mutation, no rerender)
+    msgHandlerRef.current = handleDataChannelEvent;
+
+    // Task 5.6: SSE consumer — logs Amplifier backend events with icons to the browser console
+    useAmplifierEvents({
+      onEvent: useCallback((msg) => {
+        // Future: could display events in a debug panel
+        console.debug('[VoiceApp] Amplifier event received:', msg.type);
+      }, []),
+    });
+
+    // Task 5.6: shadow ref so beforeunload can read latest messages without stale closure
+    const transcriptRef = useRef([]);
+    useEffect(() => {
+      transcriptRef.current = messages;
+    }, [messages]);
+
+    // Task 5.6: sendBeacon transcript sync on page unload
+    useEffect(() => {
+      if (!sessionId) return;
+
+      const handleBeforeUnload = () => {
+        const entries = transcriptRef.current;
+        if (!entries || entries.length === 0) return;
+        navigator.sendBeacon(
+          `/apps/voice/sessions/${sessionId}/transcript`,
+          JSON.stringify(entries),
+        );
+      };
+
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [sessionId]);
+
+    // Scroll transcript to bottom when new messages arrive
+    useEffect(() => {
+      if (transcriptEndRef.current) {
+        transcriptEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, [messages]);
+
+    // Task 5.6: resume a previous session — POST /sessions/{id}/resume then start WebRTC
+    const handleResume = useCallback(async (resumeSessionId) => {
+      setError(null);
+      setIsConnecting(true);
+      try {
+        const resp = await fetch(`/apps/voice/sessions/${resumeSessionId}/resume`, { method: 'POST' });
+        if (!resp.ok) throw new Error(`Resume failed: ${resp.status}`);
+        setSessionId(resumeSessionId);
+        console.debug('[VoiceApp] Session resumed:', resumeSessionId);
+
+        await connect();
+        setMicStream(streamRef.current);
+        healthManagerRef.current.startSession();
+      } catch (err) {
+        console.error('[VoiceApp] Resume failed:', err);
+        disconnect();
+        setError(err.message || 'Failed to resume session.');
+      } finally {
+        setIsConnecting(false);
+      }
+    }, [connect, disconnect, setMicStream, streamRef]);
+
+    // handleConnect: POST /apps/voice/sessions then initiate WebRTC
+    const handleConnect = useCallback(async () => {
+      setError(null);
+      setIsConnecting(true);
+      try {
+        // Create Amplifier session on the server
+        const sessResp = await fetch('/apps/voice/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (!sessResp.ok) {
+          throw new Error(`Failed to create session: ${sessResp.status}`);
+        }
+        const sessData = await sessResp.json();
+        setSessionId(sessData.session_id);
+        console.debug('[VoiceApp] Session created:', sessData.session_id);
+
+        // Now initiate WebRTC connection
+        await connect();
+
+        // Task 5.4: wire mic stream into useMicrophoneControl for mute support
+        setMicStream(streamRef.current);
+
+        // Task 5.5: start session health tracking
+        healthManagerRef.current.startSession();
+      } catch (err) {
+        console.error('[VoiceApp] Connection failed:', err);
+        disconnect(); // ensure full cleanup on any partial failure
+        setError(err.message || 'Connection failed. Please try again.');
+      } finally {
+        setIsConnecting(false);
+      }
+    }, [connect, disconnect, setMicStream, streamRef]);
+
+    const handleDisconnect = useCallback(() => {
+      disconnect();
+      clearMessages();
+      setSessionId(null);
+      setError(null);
+    }, [disconnect, clearMessages]);
+
+    // Derive display state
+    const isIdle = rtcState === 'idle';
+    const statusLabel = {
+      idle: 'Disconnected',
+      connecting: 'Connecting…',
+      connected: 'Connected',
+      disconnected: 'Disconnected',
+    }[rtcState] || 'Disconnected';
+
+    return html`
+      <div id="app">
+        <div class="app-header">
+          <div class="app-title">Amplifier Voice</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            ${muted && html`<span class="muted-badge">🎙 Muted</span>`}
+            <div class=${'status-badge ' + rtcState}>
+              <div class="status-dot"></div>
+              ${statusLabel}
+            </div>
+          </div>
+        </div>
+
+        ${pauseReplies && html`
+          <div class="pause-banner">
+            <span>⏸</span>
+            <span>Replies paused — say "Hey ${assistantName}, resume" to continue</span>
+          </div>
+        `}
+
+        ${error && html`
+          <div class="error-banner">
+            <span>⚠</span>
+            <span>${error}</span>
+          </div>
+        `}
+
+        ${(isIdle || rtcState === 'disconnected') && html`
+          <${SessionPicker} onResume=${handleResume} />
+        `}
+
+        <div class="transcript-container">
+          ${messages.length === 0
+            ? html`<div class="transcript-empty">No messages yet. Start a voice chat to begin.</div>`
+            : messages.map((msg) => html`
+                <div key=${msg.id} class=${'message-bubble ' + msg.role}>
+                  <div class="bubble-label">${msg.role}</div>
+                  <div
+                    class="bubble-text"
+                    ref=${(el) => {
+                      if (el) messageRefs.current[msg.id] = el;
+                      else delete messageRefs.current[msg.id];
+                    }}
+                  >${msg.content}</div>
+                </div>
+              `)
+          }
+          <div ref=${transcriptEndRef}></div>
+        </div>
+
+        <div class="controls">
+          ${isIdle || rtcState === 'disconnected'
+            ? html`
+                <button
+                  class="btn btn-start"
+                  onClick=${handleConnect}
+                  disabled=${isConnecting}
+                >
+                  ${isConnecting ? 'Connecting…' : 'Start Voice Chat'}
+                </button>
+              `
+            : html`
+                <button
+                  class="btn btn-disconnect"
+                  onClick=${handleDisconnect}
+                  disabled=${rtcState === 'connecting'}
+                >
+                  Disconnect
+                </button>
+                <${StopButton}
+                  sessionId=${sessionId}
+                  runningTools=${runningTools}
+                  onStop=${handleDisconnect}
+                />
+              `
+          }
+        </div>
+
+        ${rtcState === 'connected' && html`
+          <${MicrophoneControls}
+            muted=${muted}
+            pauseReplies=${pauseReplies}
+            onToggleMute=${toggleMute}
+            onPauseReplies=${enterPauseReplies}
+            onResumeReplies=${exitPauseReplies}
+          />
+          <${ConnectionHealthPanel}
+            status=${healthStatus}
+            strategy=${healthStrategy}
+            onStrategyChange=${setHealthStrategy}
+          />
+        `}
+      </div>
+    `;
+  }
+
+  // -------------------------------------------------------------------------
+  // Mount app
+  // -------------------------------------------------------------------------
+  render(h(VoiceApp, null), document.getElementById('app'));
+
+})();
+</script>
+</body>
+</html>

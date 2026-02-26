@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amplifier - Connect Slack</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+/* ------------------------------------------------------------------ */
+/*  Design Tokens (shared with quickstart.html)                        */
+/* ------------------------------------------------------------------ */
+:root {
+  --bg-primary: #111827;
+  --bg-secondary: #1f2937;
+  --bg-card: #374151;
+  --text-primary: #f9fafb;
+  --text-secondary: #9ca3af;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --border: #4b5563;
+  --radius: 8px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --slack-purple: #611f69;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reset & Base                                                       */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100vh;
+  padding: 40px 20px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Card                                                               */
+/* ------------------------------------------------------------------ */
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 48px 40px;
+  width: 100%;
+  max-width: 520px;
+}
+
+.logo {
+  font-size: 28px;
+  font-weight: 800;
+  margin-bottom: 4px;
+  text-align: center;
+  background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.tagline {
+  color: var(--text-secondary);
+  font-size: 15px;
+  margin-bottom: 32px;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Steps                                                              */
+/* ------------------------------------------------------------------ */
+.step {
+  margin-bottom: 28px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.step:last-of-type { border-bottom: none; }
+
+.step.disabled { opacity: 0.35; pointer-events: none; }
+.step.done .step-header .step-num { background: var(--success); }
+
+.step-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.step-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.step-body {
+  margin-left: 40px;
+}
+
+.step-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Form Elements                                                      */
+/* ------------------------------------------------------------------ */
+.field {
+  margin-bottom: 12px;
+  text-align: left;
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.field input, .field select {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.field input:focus, .field select:focus {
+  border-color: var(--accent);
+}
+
+.field input::placeholder { color: #6b7280; }
+
+.field select {
+  font-family: var(--font);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239ca3af' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+.field select option {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Manifest Box                                                       */
+/* ------------------------------------------------------------------ */
+.manifest-box {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  position: relative;
+}
+
+.manifest-box::-webkit-scrollbar { width: 6px; }
+.manifest-box::-webkit-scrollbar-track { background: transparent; }
+.manifest-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ------------------------------------------------------------------ */
+/*  Buttons                                                            */
+/* ------------------------------------------------------------------ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-decoration: none;
+}
+
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  width: 100%;
+  padding: 12px 24px;
+}
+
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+.btn-secondary {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) { background: var(--border); }
+
+.btn-slack {
+  background: var(--slack-purple);
+  color: #fff;
+  width: 100%;
+  padding: 12px 24px;
+}
+
+.btn-slack:hover { background: #4a154b; }
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.btn-row .btn { flex: 1; }
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ------------------------------------------------------------------ */
+/*  Validation Indicator                                               */
+/* ------------------------------------------------------------------ */
+.validation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  min-height: 20px;
+  margin-top: 4px;
+}
+
+.validation .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.validation.ok .dot { background: var(--success); }
+.validation.ok { color: var(--success); }
+.validation.fail .dot { background: var(--error); }
+.validation.fail { color: var(--error); }
+.validation.pending .dot { background: var(--warning); animation: pulse 1s ease infinite; }
+.validation.pending { color: var(--warning); }
+.validation.none { color: var(--text-secondary); }
+
+@keyframes pulse { 50% { opacity: 0.4; } }
+
+/* ------------------------------------------------------------------ */
+/*  Feedback Messages                                                  */
+/* ------------------------------------------------------------------ */
+.error-msg {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: rgba(239,68,68,0.1);
+  color: var(--error);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+.success-msg {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: rgba(34,197,94,0.1);
+  color: var(--success);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Footer                                                             */
+/* ------------------------------------------------------------------ */
+.footer {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">Connect Slack</div>
+  <p class="tagline">Bridge your Slack workspace to Amplifier</p>
+
+  <!-- ============================================================ -->
+  <!--  Step 1: Create App                                           -->
+  <!-- ============================================================ -->
+  <div class="step" id="step1">
+    <div class="step-header">
+      <span class="step-num">1</span>
+      <span class="step-title">Create Slack App</span>
+    </div>
+    <div class="step-body">
+      <p class="step-hint">
+        Click below to create an app with all permissions pre-configured.
+        Select your workspace, then click <strong>Create</strong>.
+      </p>
+      <div class="manifest-box" id="manifestBox">Loading manifest...</div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="copyManifest">Copy Manifest</button>
+        <a class="btn btn-slack" id="createAppLink" href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener">
+          Create Slack App
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!--  Step 2: Paste Tokens                                         -->
+  <!-- ============================================================ -->
+  <div class="step disabled" id="step2">
+    <div class="step-header">
+      <span class="step-num">2</span>
+      <span class="step-title">Paste Tokens</span>
+    </div>
+    <div class="step-body">
+      <p class="step-hint">
+        After installing the app: copy the <strong>Bot Token</strong> from
+        OAuth & Permissions, and the <strong>App Token</strong> from
+        Basic Information > App-Level Tokens
+        (create one with <code>connections:write</code> scope).
+      </p>
+      <div class="field">
+        <label for="botToken">Bot Token</label>
+        <input type="password" id="botToken" placeholder="xoxb-..." autocomplete="off" spellcheck="false">
+        <div class="validation none" id="botStatus">Paste your Bot User OAuth Token</div>
+      </div>
+      <div class="field">
+        <label for="appToken">App Token</label>
+        <input type="password" id="appToken" placeholder="xapp-..." autocomplete="off" spellcheck="false">
+        <div class="validation none" id="appStatus">Paste your App-Level Token</div>
+      </div>
+      <button class="btn btn-primary" id="validateBtn" disabled>Validate Tokens</button>
+      <div id="validateFeedback"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!--  Step 3: Choose Channel                                       -->
+  <!-- ============================================================ -->
+  <div class="step disabled" id="step3">
+    <div class="step-header">
+      <span class="step-num">3</span>
+      <span class="step-title">Choose Hub Channel</span>
+    </div>
+    <div class="step-body">
+      <p class="step-hint">
+        Pick a channel where the bot will listen for commands.
+        We recommend <code>#amplifier</code>. Make sure to
+        <code>/invite @amplifier</code> in that channel.
+      </p>
+      <div class="field">
+        <label for="channelSelect">Channel</label>
+        <select id="channelSelect">
+          <option value="">Loading channels...</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!--  Step 4: Save & Test                                          -->
+  <!-- ============================================================ -->
+  <div class="step disabled" id="step4">
+    <div class="step-header">
+      <span class="step-num">4</span>
+      <span class="step-title">Save & Connect</span>
+    </div>
+    <div class="step-body">
+      <p class="step-hint">
+        This saves your tokens to <code>keys.yaml</code> and config to
+        <code>distro.yaml</code>. Then sends a test message to verify
+        everything works.
+      </p>
+      <button class="btn btn-primary" id="saveBtn">Save & Test Connection</button>
+      <div id="saveFeedback"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <a href="/apps/settings/">Back to settings</a>
+  </div>
+</div>
+
+<script>
+const API = '/apps/slack/setup';
+
+// --- DOM refs ---
+const step1 = document.getElementById('step1');
+const step2 = document.getElementById('step2');
+const step3 = document.getElementById('step3');
+const step4 = document.getElementById('step4');
+const manifestBox = document.getElementById('manifestBox');
+const copyManifest = document.getElementById('copyManifest');
+const createAppLink = document.getElementById('createAppLink');
+const botToken = document.getElementById('botToken');
+const appToken = document.getElementById('appToken');
+const botStatus = document.getElementById('botStatus');
+const appStatus = document.getElementById('appStatus');
+const validateBtn = document.getElementById('validateBtn');
+const validateFeedback = document.getElementById('validateFeedback');
+const channelSelect = document.getElementById('channelSelect');
+const saveBtn = document.getElementById('saveBtn');
+const saveFeedback = document.getElementById('saveFeedback');
+
+// --- State ---
+let manifest_yaml = '';
+let validatedBot = '';
+let validatedApp = '';
+let teamInfo = {};
+
+// --- Helpers ---
+function esc(str) {
+  if (str == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(str);
+  return d.innerHTML;
+}
+
+function showValidation(el, cls, msg) {
+  el.className = 'validation ' + cls;
+  el.innerHTML = (cls !== 'none' ? '<span class="dot"></span> ' : '') + esc(msg);
+}
+
+function enableStep(el) { el.classList.remove('disabled'); }
+function markDone(el) { el.classList.add('done'); }
+
+// --- Step 1: Load manifest ---
+async function loadManifest() {
+  try {
+    const res = await fetch(API + '/manifest');
+    const data = await res.json();
+    manifest_yaml = data.manifest_yaml;
+    manifestBox.textContent = manifest_yaml;
+
+    // Enable step 2 once manifest is loaded (user can work on step 1 while
+    // coming back to paste tokens)
+    enableStep(step2);
+    markDone(step1);
+  } catch (err) {
+    manifestBox.textContent = 'Failed to load manifest: ' + err.message;
+  }
+}
+
+copyManifest.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(manifest_yaml);
+    copyManifest.textContent = 'Copied!';
+    setTimeout(() => { copyManifest.textContent = 'Copy Manifest'; }, 1500);
+  } catch {
+    // Fallback: select text
+    const range = document.createRange();
+    range.selectNodeContents(manifestBox);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+    copyManifest.textContent = 'Select & Ctrl+C';
+    setTimeout(() => { copyManifest.textContent = 'Copy Manifest'; }, 2000);
+  }
+});
+
+// When user clicks "Create Slack App", also enable step 2
+createAppLink.addEventListener('click', () => {
+  enableStep(step2);
+  markDone(step1);
+});
+
+// --- Step 2: Validate tokens ---
+function updateValidateBtn() {
+  const bot = botToken.value.trim();
+  const app = appToken.value.trim();
+  validateBtn.disabled = !bot.startsWith('xoxb-');
+
+  if (bot && !bot.startsWith('xoxb-')) {
+    showValidation(botStatus, 'fail', 'Must start with xoxb-');
+  } else if (bot) {
+    showValidation(botStatus, 'none', 'Ready to validate');
+  } else {
+    showValidation(botStatus, 'none', 'Paste your Bot User OAuth Token');
+  }
+
+  if (app && !app.startsWith('xapp-')) {
+    showValidation(appStatus, 'fail', 'Must start with xapp-');
+  } else if (app) {
+    showValidation(appStatus, 'none', 'Ready to validate');
+  } else {
+    showValidation(appStatus, 'none', 'Paste your App-Level Token');
+  }
+}
+
+botToken.addEventListener('input', updateValidateBtn);
+appToken.addEventListener('input', updateValidateBtn);
+
+validateBtn.addEventListener('click', async () => {
+  const bot = botToken.value.trim();
+  const app = appToken.value.trim();
+
+  validateBtn.disabled = true;
+  validateBtn.innerHTML = '<span class="spinner"></span> Validating...';
+  validateFeedback.innerHTML = '';
+  showValidation(botStatus, 'pending', 'Checking...');
+  if (app) showValidation(appStatus, 'pending', 'Checking...');
+
+  try {
+    const res = await fetch(API + '/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bot_token: bot, app_token: app }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Validation failed');
+    }
+
+    const data = await res.json();
+
+    // Bot token result
+    if (data.bot_token.valid) {
+      teamInfo = data.bot_token;
+      showValidation(botStatus, 'ok',
+        'Connected to ' + esc(data.bot_token.team) + ' as ' + esc(data.bot_token.user));
+    } else {
+      showValidation(botStatus, 'fail', 'Invalid: ' + esc(data.bot_token.error));
+    }
+
+    // App token result
+    if (data.app_token.valid) {
+      showValidation(appStatus, 'ok', 'Socket Mode ready');
+    } else if (data.app_token.error === 'not_provided') {
+      showValidation(appStatus, 'none', 'Not provided (Socket Mode won\'t work)');
+    } else {
+      showValidation(appStatus, 'fail', 'Invalid: ' + esc(data.app_token.error));
+    }
+
+    if (data.all_valid || data.bot_token.valid) {
+      validatedBot = bot;
+      validatedApp = app;
+      markDone(step2);
+
+      // Auto-load channels
+      enableStep(step3);
+      loadChannels(bot);
+    }
+  } catch (err) {
+    validateFeedback.innerHTML = '<div class="error-msg">' + esc(err.message) + '</div>';
+    showValidation(botStatus, 'fail', 'Validation failed');
+  }
+
+  validateBtn.disabled = false;
+  validateBtn.innerHTML = 'Validate Tokens';
+});
+
+// --- Step 3: Load channels ---
+async function loadChannels(token) {
+  channelSelect.innerHTML = '<option value="">Loading channels...</option>';
+
+  try {
+    const res = await fetch(API + '/channels?bot_token=' + encodeURIComponent(token));
+    const data = await res.json();
+
+    channelSelect.innerHTML = '';
+
+    if (!data.channels || data.channels.length === 0) {
+      channelSelect.innerHTML = '<option value="">No channels found</option>';
+      return;
+    }
+
+    // Add a prompt option
+    const prompt = document.createElement('option');
+    prompt.value = '';
+    prompt.textContent = 'Select a channel...';
+    channelSelect.appendChild(prompt);
+
+    // Pre-select #amplifier if it exists
+    let hasAmplifier = false;
+    for (const ch of data.channels) {
+      const opt = document.createElement('option');
+      opt.value = ch.id;
+      opt.textContent = '#' + ch.name + (ch.is_member ? '' : ' (bot not joined)');
+      opt.dataset.name = ch.name;
+      channelSelect.appendChild(opt);
+      if (ch.name === 'amplifier') {
+        hasAmplifier = true;
+        opt.selected = true;
+      }
+    }
+
+    // If #amplifier found, auto-advance
+    if (hasAmplifier) {
+      markDone(step3);
+      enableStep(step4);
+    }
+  } catch (err) {
+    channelSelect.innerHTML = '<option value="">Failed to load channels</option>';
+  }
+}
+
+channelSelect.addEventListener('change', () => {
+  if (channelSelect.value) {
+    markDone(step3);
+    enableStep(step4);
+  }
+});
+
+// --- Step 4: Save & Test ---
+saveBtn.addEventListener('click', async () => {
+  const chOpt = channelSelect.selectedOptions[0];
+  const channelId = channelSelect.value;
+  const channelName = chOpt ? (chOpt.dataset.name || '') : '';
+
+  saveBtn.disabled = true;
+  saveBtn.innerHTML = '<span class="spinner"></span> Saving...';
+  saveFeedback.innerHTML = '';
+
+  try {
+    // Save config
+    const saveRes = await fetch(API + '/configure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bot_token: validatedBot,
+        app_token: validatedApp,
+        hub_channel_id: channelId,
+        hub_channel_name: channelName,
+        socket_mode: Boolean(validatedApp),
+      }),
+    });
+
+    if (!saveRes.ok) {
+      const err = await saveRes.json();
+      throw new Error(err.detail || 'Save failed');
+    }
+
+    const saveData = await saveRes.json();
+
+    // Test connection
+    saveBtn.innerHTML = '<span class="spinner"></span> Testing connection...';
+
+    const testRes = await fetch(API + '/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel_id: channelId }),
+    });
+
+    const testData = await testRes.json();
+
+    if (testData.success) {
+      markDone(step4);
+      saveFeedback.innerHTML =
+        '<div class="success-msg">' +
+        'Connected! Check <strong>#' + esc(channelName) + '</strong> in Slack for the test message.<br>' +
+        '<small>Secrets saved to <code>' + esc(saveData.keys_path) + '</code><br>' +
+        'Config saved to <code>' + esc(saveData.config_path) + '</code></small>' +
+        '</div>';
+      saveBtn.innerHTML = 'Connected';
+    } else {
+      saveFeedback.innerHTML =
+        '<div class="success-msg">Config saved. Mode: ' + esc(saveData.mode) + '</div>' +
+        '<div class="error-msg">Test message failed: ' + esc(testData.hint || testData.error) +
+        '<br><small>Config is saved - the bridge will work once the issue is resolved. ' +
+        'Most common fix: <code>/invite @amplifier</code> in the channel.</small></div>';
+      saveBtn.innerHTML = 'Save & Test Connection';
+      saveBtn.disabled = false;
+    }
+  } catch (err) {
+    saveFeedback.innerHTML = '<div class="error-msg">' + esc(err.message) + '</div>';
+    saveBtn.innerHTML = 'Save & Test Connection';
+    saveBtn.disabled = false;
+  }
+});
+
+// --- Check existing status on load ---
+async function checkExisting() {
+  try {
+    const res = await fetch(API + '/status');
+    const data = await res.json();
+
+    if (data.configured) {
+      // Already configured - show success state
+      markDone(step1);
+      enableStep(step2);
+      markDone(step2);
+      enableStep(step3);
+      markDone(step3);
+      enableStep(step4);
+      markDone(step4);
+      saveFeedback.innerHTML =
+        '<div class="success-msg">Slack bridge is already configured (mode: ' +
+        esc(data.mode) + '). Re-run setup to change settings.</div>';
+    }
+  } catch {
+    // Ignore - just show the fresh setup flow
+  }
+}
+
+// --- Init ---
+loadManifest();
+checkExisting();
+</script>
+</body>
+</html>

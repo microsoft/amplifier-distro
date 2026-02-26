@@ -1,0 +1,35 @@
+# Real API keys (never commit)
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Docker
+snapshots/
+
+# OS
+.DS_Store
+
+# Supervisor artifacts
+supervisor.log
+scripts/overnight-supervisor.sh
+
+# Project management (private team data)
+.amplifier/team.yaml
+
+# OAuth setup artifacts (user-specific credentials)
+gmail_credentials.json
+token.pickle
+oauth_setup.py
+
+# Scratch/notes files
+SCRATCH-*.md
+
+.amplifier/settings.local.yaml
+.worktrees/

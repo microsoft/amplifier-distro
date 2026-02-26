@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amplifier - Install Wizard</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+/* ------------------------------------------------------------------ */
+/*  Design Tokens                                                      */
+/* ------------------------------------------------------------------ */
+:root {
+  --bg-primary: #111827;
+  --bg-secondary: #1f2937;
+  --bg-card: #374151;
+  --text-primary: #f9fafb;
+  --text-secondary: #9ca3af;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --border: #4b5563;
+  --radius: 8px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reset & Base                                                       */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 20px;
+  min-height: 100vh;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Step Indicator                                                     */
+/* ------------------------------------------------------------------ */
+.step-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 48px;
+  flex-shrink: 0;
+}
+
+.step-dot {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border: 2px solid var(--border);
+  transition: all 0.25s ease;
+  cursor: default;
+  position: relative;
+}
+
+.step-dot.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.step-dot.completed {
+  background: var(--success);
+  color: #fff;
+  border-color: var(--success);
+}
+
+.step-connector {
+  width: 40px;
+  height: 2px;
+  background: var(--border);
+  transition: background 0.25s ease;
+}
+
+.step-connector.completed {
+  background: var(--success);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Card Container                                                     */
+/* ------------------------------------------------------------------ */
+.wizard-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 40px;
+  width: 100%;
+  max-width: 640px;
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.wizard-card h1 {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.wizard-card .subtitle {
+  color: var(--text-secondary);
+  font-size: 15px;
+  margin-bottom: 32px;
+}
+
+.wizard-card .card-body {
+  flex: 1;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Navigation                                                         */
+/* ------------------------------------------------------------------ */
+.nav-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Buttons                                                            */
+/* ------------------------------------------------------------------ */
+button, .btn {
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 24px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+.btn-secondary:hover { color: var(--text-primary); border-color: var(--text-primary); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  padding: 10px 16px;
+}
+.btn-ghost:hover { color: var(--text-primary); }
+
+.btn-success {
+  background: var(--success);
+  color: #fff;
+  border-color: var(--success);
+}
+.btn-success:hover { background: #16a34a; border-color: #16a34a; }
+
+.btn-sm { padding: 6px 14px; font-size: 13px; }
+
+/* ------------------------------------------------------------------ */
+/*  Form Elements                                                      */
+/* ------------------------------------------------------------------ */
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"],
+select {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+input:focus, select:focus {
+  border-color: var(--accent);
+}
+
+.field-group {
+  margin-bottom: 20px;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Module Grid                                                        */
+/* ------------------------------------------------------------------ */
+.module-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.module-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.module-card:hover { border-color: var(--accent); }
+.module-card.selected { border-color: var(--accent); background: rgba(59,130,246,0.1); }
+
+.module-card .module-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.module-card .module-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.module-card .module-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.badge-provider { background: rgba(139,92,246,0.2); color: #a78bfa; }
+.badge-tool     { background: rgba(59,130,246,0.2);  color: #93c5fd; }
+.badge-bundle   { background: rgba(245,158,11,0.2);  color: #fbbf24; }
+
+.checkbox-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+.module-card.selected .checkbox-icon {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.module-card.selected .checkbox-icon::after {
+  content: '';
+  width: 6px;
+  height: 10px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Interface Cards                                                    */
+/* ------------------------------------------------------------------ */
+.interface-row {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.interface-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.interface-info h3 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.interface-info p  { font-size: 13px; color: var(--text-secondary); }
+
+.installed-badge {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--success);
+  padding: 6px 14px;
+  border: 1px solid var(--success);
+  border-radius: var(--radius);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Provider Selection                                                 */
+/* ------------------------------------------------------------------ */
+.provider-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.provider-card {
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.provider-card:hover { border-color: var(--accent); }
+.provider-card.selected { border-color: var(--accent); background: rgba(59,130,246,0.08); }
+.provider-card.configured { border-color: var(--success); }
+.provider-card.configured.selected { border-color: var(--accent); }
+.provider-card.detected { border-color: var(--warning, #f59e0b); border-style: dashed; }
+.provider-card.detected.selected { border-color: var(--accent); border-style: solid; }
+
+.provider-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.provider-card-header h3 { font-size: 15px; font-weight: 600; margin: 0; }
+
+.provider-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.provider-badge.configured {
+  background: rgba(34,197,94,0.15);
+  color: var(--success);
+}
+.provider-badge.detected {
+  background: rgba(245,158,11,0.15);
+  color: var(--warning, #f59e0b);
+}
+
+.provider-card p { font-size: 13px; color: var(--text-secondary); margin: 0 0 6px; }
+
+.provider-card .provider-link {
+  display: inline-block;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.provider-card .provider-link:hover { text-decoration: underline; }
+
+.provider-env-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.env-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.provider-key-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.provider-key-row input {
+  flex: 1;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-main);
+  color: var(--text-primary);
+}
+
+.provider-save-msg {
+  font-size: 12px;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+}
+.provider-save-msg.ok   { background: rgba(34,197,94,0.1);  color: var(--success); }
+.provider-save-msg.fail { background: rgba(239,68,68,0.1);  color: var(--error); }
+
+.configured-summary {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+.configured-summary strong { color: var(--text-primary); }
+
+/* ------------------------------------------------------------------ */
+/*  Verification Checklist                                             */
+/* ------------------------------------------------------------------ */
+.checklist {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 15px;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border-radius: var(--radius);
+}
+
+.check-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+.check-icon.pass    { background: var(--success); color: #fff; }
+.check-icon.fail    { background: var(--error);   color: #fff; }
+.check-icon.pending { background: var(--bg-secondary); color: var(--text-secondary); border: 2px solid var(--border); }
+
+.check-label { flex: 1; }
+.check-msg   { font-size: 12px; color: var(--text-secondary); }
+
+/* ------------------------------------------------------------------ */
+/*  Toggle Switch                                                      */
+/* ------------------------------------------------------------------ */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.toggle {
+  width: 48px;
+  height: 26px;
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  border-radius: 13px;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+.toggle.on { background: var(--accent); border-color: var(--accent); }
+.toggle .toggle-knob {
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s ease;
+}
+.toggle.on .toggle-knob { transform: translateX(22px); }
+
+.toggle-label { font-size: 15px; font-weight: 500; }
+
+.optional-note {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  margin-top: 16px;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Scrollbar                                                          */
+/* ------------------------------------------------------------------ */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ------------------------------------------------------------------ */
+/*  Status / Spinner                                                   */
+/* ------------------------------------------------------------------ */
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.status-line {
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Hidden                                                             */
+/* ------------------------------------------------------------------ */
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================== -->
+<!--  Step Indicator                                                  -->
+<!-- ============================================================== -->
+<div class="step-indicator" id="stepIndicator"></div>
+
+<!-- ============================================================== -->
+<!--  Wizard Card                                                     -->
+<!-- ============================================================== -->
+<div class="wizard-card" id="wizardCard"></div>
+
+<script>
+/* ================================================================== */
+/*  State                                                              */
+/* ================================================================== */
+const STEPS = [
+  { id: 'welcome',    title: 'Welcome' },
+  { id: 'config',     title: 'Configuration' },
+  { id: 'provider',   title: 'Provider' },
+  { id: 'modules',    title: 'Modules' },
+  { id: 'interfaces', title: 'Interfaces' },
+  { id: 'verify',     title: 'Verify' },
+];
+
+const state = {
+  step: 0,
+  detected: null,
+  // Step 1 - Welcome
+  workspace: '~/dev',
+  githubHandle: '',
+  gitEmail: '',
+  // Step 2 - Config
+  cacheTTL: 168,
+  preflightMode: 'block',
+  // Step 3 - Provider
+  providers: [],              // loaded from /providers endpoint
+  selectedProvider: null,     // which provider card is expanded for key entry
+  providerKeyInput: '',       // current key input value
+  savingProvider: null,       // provider ID currently being saved
+  // Step 4 - Modules
+  modules: [],
+  selectedModules: new Set(),
+  // Step 5 - Interfaces
+  cliInstalled: false,
+  cliError: null,
+  cliInstalling: false,
+  tuiInstalled: false,
+  tuiError: null,
+  tuiInstalling: false,
+  // Step 6 - Verify
+  checks: [],
+  verifyRunning: false,
+};
+
+/* ================================================================== */
+/*  API Helpers                                                        */
+/* ================================================================== */
+const API = '/apps/install-wizard';
+
+async function api(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  try {
+    const res = await fetch(API + path, opts);
+    if (!res.ok) return { error: `HTTP ${res.status}` };
+    return await res.json();
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+/* ================================================================== */
+/*  Auto-detection on load                                             */
+/* ================================================================== */
+async function autoDetect() {
+  const data = await api('GET', '/detect');
+  if (data && !data.error) {
+    state.detected = data;
+    if (data.workspace_root) state.workspace = data.workspace_root;
+    if (data.github_handle)  state.githubHandle = data.github_handle;
+    if (data.git_email)      state.gitEmail = data.git_email;
+    if (data.cache_max_age_hours != null)   state.cacheTTL = data.cache_max_age_hours;
+    if (data.preflight_mode) state.preflightMode = data.preflight_mode;
+    if (data.cli_installed != null)  state.cliInstalled = data.cli_installed;
+    if (data.tui_installed != null)  state.tuiInstalled = data.tui_installed;
+  }
+  // Load provider catalog with configuration status
+  const provData = await api('GET', '/providers');
+  if (provData && !provData.error && provData.providers) {
+    state.providers = provData.providers;
+  }
+  // Load available modules and track currently enabled ones
+  const mods = await api('GET', '/modules');
+  if (mods && !mods.error && Array.isArray(mods)) {
+    state.modules = mods;
+    state.selectedModules = new Set(
+      mods.filter(m => m.enabled || m.default).map(m => m.id || m.name)
+    );
+  } else if (mods && !mods.error && mods.modules) {
+    state.modules = mods.modules;
+    state.selectedModules = new Set(
+      mods.modules.filter(m => m.enabled || m.default).map(m => m.id || m.name)
+    );
+  }
+  
+  // Detect which steps are already complete (idempotency)
+  detectCompletedSteps();
+  render();
+}
+
+/* ================================================================== */
+/*  Step Completion Detection (Idempotency)                           */
+/* ================================================================== */
+function detectCompletedSteps() {
+  state.completedSteps = state.completedSteps || {};
+  
+  // Step 1 (welcome): has workspace AND at least one identity field
+  state.completedSteps.welcome = !!(
+    state.workspace && (state.githubHandle || state.gitEmail)
+  );
+  
+  // Step 2 (config): always complete (defaults are valid, step is review-only)
+  state.completedSteps.config = true;
+  
+  // Step 3 (provider): at least one provider is fully configured (key + settings + overlay)
+  state.completedSteps.provider = (state.providers || []).some(p => p.configured);
+  
+  // Step 4 (modules): has selected modules beyond just defaults
+  const defaultCount = (state.modules || []).filter(m => m.default).length;
+  const selectedCount = state.selectedModules ? state.selectedModules.size : 0;
+  state.completedSteps.modules = selectedCount > defaultCount;
+  
+  // Step 5 (interfaces): CLI or TUI is installed
+  state.completedSteps.interfaces = state.cliInstalled || state.tuiInstalled;
+  
+  // Step 6 (verify): runs on demand
+  state.completedSteps.verify = false;
+}
+
+/* ================================================================== */
+/*  Navigation                                                         */
+/* ================================================================== */
+function goTo(step) {
+  state.step = Math.max(0, Math.min(STEPS.length - 1, step));
+  if (state.step === STEPS.length - 1) runVerification();
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function submitStep() {
+  const stepId = STEPS[state.step].id;
+  let body = {};
+
+  switch (stepId) {
+    case 'welcome':
+      body = {
+        workspace_root: state.workspace,
+        github_handle: state.githubHandle,
+        git_email: state.gitEmail,
+      };
+      break;
+    case 'config':
+      body = {
+        cache_max_age_hours: state.cacheTTL,
+        preflight_mode: state.preflightMode,
+      };
+      break;
+    case 'modules':
+      body = { modules: [...state.selectedModules] };
+      break;
+    case 'interfaces':
+      body = {};
+      break;
+    case 'provider':
+      // Sync mode: auto-register any providers that have keys but aren't
+      // fully configured (settings.yaml + overlay bundle).
+      body = {};
+      break;
+    case 'verify':
+      return;
+  }
+
+  await api('POST', '/steps/' + stepId, body);
+  goTo(state.step + 1);
+}
+
+/* ================================================================== */
+/*  Step Indicator Rendering                                           */
+/* ================================================================== */
+function renderIndicator() {
+  const el = document.getElementById('stepIndicator');
+  let html = '';
+  STEPS.forEach((s, i) => {
+    // A step is "completed" if we've already passed it OR if it's already configured
+    const isPassed = i < state.step;
+    const isCompleted = (state.completedSteps && state.completedSteps[s.id]) || isPassed;
+    const isActive = i === state.step;
+    
+    const cls = isCompleted ? 'completed' : isActive ? 'active' : '';
+    const icon = isCompleted ? '&#10003;' : (i + 1);
+    html += `<div class="step-dot ${cls}" title="${isCompleted && !isPassed ? s.name + ' (already configured)' : ''}">${icon}</div>`;
+    if (i < STEPS.length - 1) {
+      const connectorCompleted = isCompleted && !isPassed ? 'completed' : isPassed ? 'completed' : '';
+      html += `<div class="step-connector ${connectorCompleted}"></div>`;
+    }
+  });
+  el.innerHTML = html;
+}
+
+/* ================================================================== */
+/*  Step Content Rendering                                             */
+/* ================================================================== */
+function render() {
+  renderIndicator();
+  const card = document.getElementById('wizardCard');
+  const stepId = STEPS[state.step].id;
+  const renderers = {
+    welcome: renderWelcome,
+    config: renderConfig,
+    modules: renderModules,
+    interfaces: renderInterfaces,
+    provider: renderProvider,
+    verify: renderVerify,
+  };
+  card.innerHTML = renderers[stepId]();
+  bindEvents();
+}
+
+/* ------------------------------------------------------------------ */
+/*  Step 1: Welcome                                                    */
+/* ------------------------------------------------------------------ */
+function renderWelcome() {
+  return `
+    <h1>Welcome to Amplifier</h1>
+    <p class="subtitle">Let's set up your development environment</p>
+    <div class="card-body">
+      <div class="field-group">
+        <label for="workspace">Workspace Folder</label>
+        <input type="text" id="workspace" value="${esc(state.workspace)}" data-bind="workspace">
+        <p class="field-hint">Root directory for your Amplifier projects</p>
+      </div>
+      <div class="field-group">
+        <label for="githubHandle">GitHub Handle</label>
+        <input type="text" id="githubHandle" value="${esc(state.githubHandle)}" data-bind="githubHandle" placeholder="your-username">
+      </div>
+      <div class="field-group">
+        <label for="gitEmail">Git Email</label>
+        <input type="text" id="gitEmail" value="${esc(state.gitEmail)}" data-bind="gitEmail" placeholder="you@example.com">
+      </div>
+    </div>
+    <div class="nav-row">
+      <div></div>
+      <button class="btn-primary" onclick="submitStep()">Next</button>
+    </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Step 2: Configuration                                              */
+/* ------------------------------------------------------------------ */
+function renderConfig() {
+  return `
+    <h1>Configuration</h1>
+    <p class="subtitle">Tune your distro.yaml settings</p>
+    <div class="card-body">
+      <div class="field-group">
+        <label for="cacheTTL">Cache TTL (hours)</label>
+        <input type="number" id="cacheTTL" value="${state.cacheTTL}" min="1" data-bind="cacheTTL" data-type="number">
+        <p class="field-hint">How long to cache downloaded modules before refreshing</p>
+      </div>
+      <div class="field-group">
+        <label for="preflightMode">Preflight Mode</label>
+        <select id="preflightMode" data-bind="preflightMode">
+          <option value="block" ${state.preflightMode === 'block' ? 'selected' : ''}>Block - prevent start if checks fail</option>
+          <option value="warn"  ${state.preflightMode === 'warn'  ? 'selected' : ''}>Warn - show warnings but continue</option>
+          <option value="off"   ${state.preflightMode === 'off'   ? 'selected' : ''}>Off - skip preflight checks</option>
+        </select>
+        <p class="field-hint">Controls behavior when preflight checks detect issues</p>
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-ghost" onclick="goTo(${state.step - 1})">Back</button>
+      <button class="btn-primary" onclick="submitStep()">Next</button>
+    </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Step 4: Modules                                                    */
+/* ------------------------------------------------------------------ */
+function renderModules() {
+  const mods = state.modules;
+  const fallbackModules = state.modules.length > 0 ? '' : `
+    <p style="color: var(--text-secondary); padding: 40px 0; text-align: center;">
+      Feature list unavailable. The backend will provide available features once connected.
+    </p>`;
+
+  return `
+    <h1>Choose Your Features</h1>
+    <p class="subtitle">Select the features you would like to enable (you can change these later)</p>
+    <div class="card-body">
+      ${fallbackModules}
+      <div class="module-grid">
+        ${mods.map(m => {
+          const sel = state.selectedModules.has(m.id);
+          const badgeCls = m.category === 'provider' ? 'badge-provider'
+                         : m.category === 'tool' ? 'badge-tool' : 'badge-bundle';
+          return `
+            <div class="module-card ${sel ? 'selected' : ''}" data-module="${esc(m.id)}">
+              <div class="module-header">
+                <span class="module-name">${esc(m.name)}</span>
+                <span class="checkbox-icon"></span>
+              </div>
+              <span class="badge ${badgeCls}">${esc(m.category)}</span>
+              <span class="module-desc">${esc(m.description || '')}</span>
+            </div>`;
+        }).join('')}
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-ghost" onclick="goTo(${state.step - 1})">Back</button>
+      <button class="btn-primary" onclick="submitStep()">Next</button>
+    </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Step 5: Interfaces                                                 */
+/* ------------------------------------------------------------------ */
+function renderInterfaces() {
+  const cliBtnHtml = state.cliInstalled
+    ? '<span class="installed-badge">Installed</span>'
+    : state.cliInstalling
+      ? '<button class="btn-sm btn-secondary" disabled><span class="spinner"></span> Installing</button>'
+      : '<button class="btn-sm btn-primary" id="installCliBtn">Install</button>';
+
+  const tuiBtnHtml = state.tuiInstalled
+    ? '<span class="installed-badge">Installed</span>'
+    : state.tuiInstalling
+      ? '<button class="btn-sm btn-secondary" disabled><span class="spinner"></span> Installing</button>'
+      : '<button class="btn-sm btn-primary" id="installTuiBtn">Install</button>';
+
+  return `
+    <h1>Install Interfaces</h1>
+    <p class="subtitle">Choose how you interact with Amplifier</p>
+    <div class="card-body">
+      <div class="interface-row">
+        <div class="interface-card">
+          <div class="interface-info">
+            <h3>Command Line (CLI)</h3>
+            <p>The <code>amplifier</code> command for your terminal</p>
+          </div>
+          ${cliBtnHtml}
+        </div>
+        <div class="interface-card">
+          <div class="interface-info">
+            <h3>Terminal UI (TUI)</h3>
+            <p>The <code>amplifier-tui</code> interactive terminal app</p>
+          </div>
+          ${tuiBtnHtml}
+        </div>
+      </div>
+      ${state.cliError ? `<div class="provider-save-msg fail">CLI: ${esc(state.cliError)}</div>` : ''}
+      ${state.tuiError ? `<div class="provider-save-msg fail">TUI: ${esc(state.tuiError)}</div>` : ''}
+    </div>
+    <div class="nav-row">
+      <button class="btn-ghost" onclick="goTo(${state.step - 1})">Back</button>
+      <button class="btn-primary" onclick="submitStep()">Next</button>
+    </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Step 3: Provider                                                   */
+/* ------------------------------------------------------------------ */
+function renderProvider() {
+  const providers = state.providers || [];
+  const configuredNames = providers.filter(p => p.configured).map(p => p.name);
+  const detectedNames = providers.filter(p => p.has_key && !p.configured).map(p => p.name);
+
+  let summaryHtml = '';
+  if (configuredNames.length > 0) {
+    summaryHtml += `<div class="configured-summary">Configured: <strong>${configuredNames.map(esc).join('</strong>, <strong>')}</strong></div>`;
+  }
+  if (detectedNames.length > 0) {
+    summaryHtml += `<div class="configured-summary">Key detected (needs setup): <strong>${detectedNames.map(esc).join('</strong>, <strong>')}</strong> &mdash; click Next to complete setup.</div>`;
+  }
+  if (configuredNames.length === 0 && detectedNames.length === 0) {
+    summaryHtml = `<div class="configured-summary">No providers configured yet. Add at least one API key to continue.</div>`;
+  }
+
+  return `
+    <h1>Set Up Your AI Providers</h1>
+    <p class="subtitle">Add API keys for one or more AI model providers</p>
+    <div class="card-body">
+      ${summaryHtml}
+      <div class="provider-grid">
+        ${providers.map(p => {
+          const isSelected = state.selectedProvider === p.id;
+          const cls = [
+            'provider-card',
+            p.configured ? 'configured' : p.has_key ? 'detected' : '',
+            isSelected ? 'selected' : '',
+          ].filter(Boolean).join(' ');
+
+          const placeholder = p.key_prefix ? p.key_prefix + '...' : 'Enter key or URL';
+
+          const saveResult = state.providerSaveResult && state.providerSaveResult.id === p.id
+            ? state.providerSaveResult : null;
+
+          return `
+            <div class="${cls}" data-provider="${esc(p.id)}">
+              <div class="provider-card-header">
+                <h3>${esc(p.name)}</h3>
+                ${p.configured ? '<span class="provider-badge configured">Configured</span>'
+                  : p.has_key ? '<span class="provider-badge detected">Key Detected</span>' : ''}
+              </div>
+              <p>${esc(p.description)}</p>
+              ${!p.configured && !p.has_key ? `<a class="provider-link" href="${esc(p.console_url)}" target="_blank" rel="noopener">Get an API key</a>` : ''}
+              ${p.has_key && !p.configured ? `
+                <div class="provider-env-row">
+                  <span class="env-hint">Key found in environment</span>
+                  <button class="btn-sm btn-secondary"
+                          data-provider-use="${esc(p.id)}"
+                          ${state.savingProvider === p.id ? 'disabled' : ''}>
+                    ${state.savingProvider === p.id ? 'Setting up...' : 'Use This Key'}
+                  </button>
+                </div>
+              ` : ''}
+              ${isSelected ? `
+                <div class="provider-key-row">
+                  <input type="password" class="provider-key-input"
+                         data-provider-key="${esc(p.id)}"
+                         placeholder="${esc(placeholder)}"
+                         value="${esc(state.providerKeyInput)}">
+                  <button class="btn-sm btn-secondary provider-save-btn"
+                          data-provider-save="${esc(p.id)}"
+                          ${state.savingProvider === p.id ? 'disabled' : ''}>
+                    ${state.savingProvider === p.id ? 'Saving...' : p.configured ? 'Update' : 'Add Key'}
+                  </button>
+                </div>
+              ` : ''}
+              ${saveResult ? `<div class="provider-save-msg ${saveResult.ok ? 'ok' : 'fail'}">${esc(saveResult.message)}</div>` : ''}
+            </div>`;
+        }).join('')}
+      </div>
+    </div>
+    <div class="nav-row">
+      <button class="btn-ghost" onclick="goTo(${state.step - 1})">Back</button>
+      <button class="btn-primary" onclick="submitStep()">Next</button>
+    </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Step 7: Verify                                                      */
+/* ------------------------------------------------------------------ */
+function renderVerify() {
+  const allPassed = state.checks.length > 0 && state.checks.every(c => c.passed);
+  const failedChecks = state.checks.filter(c => !c.passed);
+
+  const checksHtml = state.checks.length === 0
+    ? `<div class="status-line"><span class="spinner"></span> Running verification checks...</div>`
+    : `<ul class="checklist">
+        ${state.checks.map(c => `
+          <li class="check-item">
+            <span class="check-icon ${c.passed ? 'pass' : 'fail'}">${c.passed ? '&#10003;' : '&#10007;'}</span>
+            <span class="check-label">${esc(c.name)}</span>
+            <span class="check-msg">${esc(c.message || '')}</span>
+          </li>`).join('')}
+       </ul>`;
+
+  const actionHtml = allPassed
+    ? `<button class="btn-success" onclick="window.location.href='/'">Setup Finished!</button>`
+    : state.checks.length > 0
+      ? `<div style="display:flex; gap:12px;">
+           <button class="btn-secondary" onclick="runVerification()">Re-check</button>
+           <button class="btn-primary" onclick="window.location.href='/'">Continue to Dashboard</button>
+         </div>`
+      : '';
+
+  return `
+    <h1>${allPassed ? 'All Set!' : state.checks.length > 0 ? 'Almost There' : 'Verifying...'}</h1>
+    <p class="subtitle">${allPassed
+        ? 'Your Amplifier environment is ready'
+        : state.checks.length > 0
+          ? failedChecks.length + ' check' + (failedChecks.length !== 1 ? 's' : '') + ' need attention'
+          : 'Checking your environment'}</p>
+    <div class="card-body">
+      ${checksHtml}
+    </div>
+    <div class="nav-row">
+      <button class="btn-ghost" onclick="goTo(${state.step - 1})">Back</button>
+      ${actionHtml}
+    </div>`;
+}
+
+/* ================================================================== */
+/*  Verification                                                       */
+/* ================================================================== */
+async function runVerification() {
+  state.checks = [];
+  state.verifyRunning = true;
+  render();
+
+  const data = await api('POST', '/steps/verify', {});
+  if (data && !data.error) {
+    state.checks = [
+      { name: 'Workspace directory', passed: !!data.workspace_root, message: data.workspace_root || 'Not set' },
+      { name: 'Identity (GitHub handle)', passed: !!data.github_handle, message: data.github_handle || 'Not set' },
+      { name: 'API key configured', passed: !!data.has_api_key, message: data.has_api_key ? 'Found' : 'No provider keys detected' },
+      { name: 'Overlay bundle', passed: !!data.overlay_exists, message: data.overlay_exists ? 'Found' : 'Not created yet' },
+      { name: 'CLI installed', passed: !!data.cli_installed, message: data.cli_installed ? 'Found' : 'Not detected' },
+      { name: 'TUI installed', passed: !!data.tui_installed, message: data.tui_installed ? 'Found' : 'Not detected' },
+    ];
+  } else {
+    state.checks = [
+      { name: 'Verification', passed: false, message: 'Could not reach the server. Check that it is running.' },
+    ];
+  }
+
+  state.verifyRunning = false;
+  render();
+}
+
+/* ================================================================== */
+/*  Event Binding                                                      */
+/* ================================================================== */
+function bindEvents() {
+  // Data-bind inputs
+  document.querySelectorAll('[data-bind]').forEach(el => {
+    el.addEventListener('input', () => {
+      const key = el.dataset.bind;
+      state[key] = el.dataset.type === 'number' ? Number(el.value) : el.value;
+    });
+    el.addEventListener('change', () => {
+      const key = el.dataset.bind;
+      state[key] = el.dataset.type === 'number' ? Number(el.value) : el.value;
+    });
+  });
+
+  // Module cards
+  document.querySelectorAll('[data-module]').forEach(card => {
+    card.addEventListener('click', () => {
+      const name = card.dataset.module;
+      if (state.selectedModules.has(name)) {
+        state.selectedModules.delete(name);
+      } else {
+        state.selectedModules.add(name);
+      }
+      render();
+    });
+  });
+
+  // CLI install
+  const cliBtn = document.getElementById('installCliBtn');
+  if (cliBtn) {
+    cliBtn.addEventListener('click', async () => {
+      state.cliInstalling = true;
+      state.cliError = null;
+      render();
+      const res = await api('POST', '/steps/interfaces', { install_cli: true });
+      state.cliInstalling = false;
+      if (res) {
+        state.cliInstalled = !!res.cli_installed;
+        if (res.cli_error) state.cliError = res.cli_error;
+      }
+      detectCompletedSteps();
+      render();
+    });
+  }
+
+  // TUI install
+  const tuiBtn = document.getElementById('installTuiBtn');
+  if (tuiBtn) {
+    tuiBtn.addEventListener('click', async () => {
+      state.tuiInstalling = true;
+      state.tuiError = null;
+      render();
+      const res = await api('POST', '/steps/interfaces', { install_tui: true });
+      state.tuiInstalling = false;
+      if (res) {
+        state.tuiInstalled = !!res.tui_installed;
+        if (res.tui_error) state.tuiError = res.tui_error;
+      }
+      detectCompletedSteps();
+      render();
+    });
+  }
+
+  // Provider card selection (expand key input)
+  document.querySelectorAll('[data-provider]').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.tagName === 'A') return;
+      if (e.target.closest('.provider-key-row')) return;
+      if (e.target.closest('.provider-env-row')) return;
+      const pid = card.dataset.provider;
+      if (state.selectedProvider === pid) {
+        state.selectedProvider = null;
+      } else {
+        state.selectedProvider = pid;
+        state.providerKeyInput = '';
+        state.providerSaveResult = null;
+      }
+      render();
+    });
+  });
+
+  // Provider key input binding
+  document.querySelectorAll('[data-provider-key]').forEach(el => {
+    el.addEventListener('input', () => {
+      state.providerKeyInput = el.value;
+    });
+  });
+
+  // "Use This Key" buttons (env var detected, no manual input needed)
+  document.querySelectorAll('[data-provider-use]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const pid = btn.dataset.providerUse;
+      state.savingProvider = pid;
+      state.providerSaveResult = null;
+      render();
+      const res = await api('POST', '/steps/provider', { provider: pid });
+      state.savingProvider = null;
+      if (res && !res.error && res.verified) {
+        const prov = state.providers.find(p => p.id === (res.provider || pid));
+        if (prov) prov.configured = true;
+        let msg = res.provider_name + ' configured using existing key';
+        if (res.overlay_error) {
+          msg += ' (key saved, but overlay bundle not updated: ' + res.overlay_error + ')';
+        }
+        state.providerSaveResult = { id: res.provider || pid, ok: !res.overlay_error, message: msg };
+        detectCompletedSteps();
+      } else {
+        const detail = (res && res.detail) || 'Failed to register provider with existing key.';
+        state.providerSaveResult = { id: pid, ok: false, message: detail };
+      }
+      render();
+    });
+  });
+
+  // Provider save key buttons
+  document.querySelectorAll('[data-provider-save]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const pid = btn.dataset.providerSave;
+      if (!state.providerKeyInput.trim()) return;
+      state.savingProvider = pid;
+      state.providerSaveResult = null;
+      render();
+      const res = await api('POST', '/steps/provider', {
+        provider: pid,
+        api_key: state.providerKeyInput,
+      });
+      state.savingProvider = null;
+      if (res && !res.error && res.verified) {
+        // Mark provider as configured in local state
+        const prov = state.providers.find(p => p.id === (res.provider || pid));
+        if (prov) prov.configured = true;
+        let msg = res.provider_name + ' configured';
+        if (res.overlay_error) {
+          msg += ' (key saved, but overlay bundle not updated: ' + res.overlay_error + ')';
+        }
+        state.providerSaveResult = { id: res.provider || pid, ok: !res.overlay_error, message: msg };
+        state.providerKeyInput = '';
+        // Keep card expanded if overlay failed so user sees the warning
+        if (!res.overlay_error) state.selectedProvider = null;
+        detectCompletedSteps();
+      } else {
+        const detail = (res && res.detail) || 'Failed to save key. Check your key and try again.';
+        state.providerSaveResult = { id: pid, ok: false, message: detail };
+      }
+      render();
+    });
+  });
+}
+
+/* ================================================================== */
+/*  Utilities                                                          */
+/* ================================================================== */
+function esc(str) {
+  if (str == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(str);
+  return d.innerHTML;
+}
+
+/* ================================================================== */
+/*  Boot                                                               */
+/* ================================================================== */
+render();
+autoDetect();
+</script>
+</body>
+</html>

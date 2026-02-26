@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#111827"/>
+  <!-- Stylised "A" built from the accent blue -->
+  <path d="M16 5 L25 26 L21.5 26 L19.2 20 L12.8 20 L10.5 26 L7 26 Z
+           M16 10.5 L13.8 18 L18.2 18 Z"
+        fill="#3b82f6" fill-rule="evenodd"/>
+  <!-- Small signal arc — the "amplifier" motif -->
+  <path d="M22.5 9.5 a8.5 8.5 0 0 1 0 12"
+        fill="none" stroke="#60a5fa" stroke-width="1.6"
+        stroke-linecap="round" opacity="0.85"/>
+</svg>
