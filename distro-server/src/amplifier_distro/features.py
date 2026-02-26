@@ -72,15 +72,15 @@ PROVIDERS: dict[str, Provider] = {
     "openai": Provider(
         id="openai",
         name="OpenAI",
-        description="GPT models (GPT-4o, o3, Codex)",
+        description="GPT models",
         include="foundation:providers/openai-gpt",
         key_prefix="sk-",
         env_var="OPENAI_API_KEY",
-        default_model="gpt-4o",
+        default_model="gpt-5.2",
         module_id="provider-openai",
         source_url="git+https://github.com/microsoft/amplifier-module-provider-openai@main",
         console_url="https://platform.openai.com/api-keys",
-        fallback_models=("gpt-4o", "gpt-4o-mini", "o1", "o3-mini"),
+        fallback_models=("gpt-5.2", "gpt-5-mini", "gpt-4.1"),
     ),
     "google": Provider(
         id="google",
@@ -129,11 +129,11 @@ PROVIDERS: dict[str, Provider] = {
         include="foundation:providers/azure-openai",
         key_prefix="",
         env_var="AZURE_OPENAI_API_KEY",
-        default_model="gpt-4o",
+        default_model="gpt-5.2",
         module_id="provider-azure-openai",
         source_url="git+https://github.com/microsoft/amplifier-module-provider-azure-openai@main",
         console_url="https://portal.azure.com/",
-        fallback_models=("gpt-4o", "gpt-4o-mini"),
+        fallback_models=("gpt-5.2", "gpt-5-mini", "gpt-4.1"),
     ),
 }
 
