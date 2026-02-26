@@ -170,8 +170,15 @@ class SessionEventTranslator:
                 # is available (not expected in normal flow; treat as success)
                 success = True
                 if result is not None:
-                    output = str(result.output) if result.output is not None else None
-                    error = result.error if hasattr(result, "error") else None
+                    # Kernel serializes ToolResult to dict via .model_dump() before emitting.
+                    # Handle both dict shape (serialized) and object shape (legacy/test).
+                    if isinstance(result, dict):
+                        raw_output = result.get("output")
+                        output = str(raw_output) if raw_output is not None else None
+                        error = result.get("error")
+                    else:
+                        output = str(result.output) if result.output is not None else None
+                        error = getattr(result, "error", None)
                     success = error is None
                 self._cycle_count += 1
                 return {
