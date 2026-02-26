@@ -21,8 +21,9 @@ curl -fsSL https://raw.githubusercontent.com/microsoft/amplifier-distro/main/ins
 ### Developer
 
 ```bash
-git clone https://github.com/microsoft/amplifier-distro && cd amplifier-distro/distro-server
-uv venv && uv pip install -e .
+git clone https://github.com/microsoft/amplifier-distro && cd amplifier-distro
+cd distro-server
+uv tool install -e .
 ```
 
 ## Usage
@@ -60,10 +61,9 @@ amp-distro service status        # Check service status
 
 | App | Path | Description |
 |-----|------|-------------|
-| Web Chat | `/apps/web-chat/` | Browser-based chat with session persistence |
+| Web Chat | `/apps/chat/` | Browser-based chat with session persistence |
 | Slack | `/apps/slack/` | Full Slack bridge via Socket Mode |
 | Voice | `/apps/voice/` | WebRTC voice via OpenAI Realtime API |
-| Routines | `/apps/routines/` | Scheduled routine execution |
 
 ## Documents
 
