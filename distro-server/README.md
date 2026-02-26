@@ -18,11 +18,9 @@ amplifier-distro is one part of a three-part setup:
 
 ## Install
 
-```bash
-uv tool install git+https://github.com/microsoft/amplifier-distro
-```
+See [Distro README](../README.md) for the normal install.
 
-### Developer
+For **development**, you can install in "editable" mode:
 
 ```bash
 git clone https://github.com/microsoft/amplifier-distro && cd amplifier-distro
