@@ -147,6 +147,10 @@ class SessionBackend(Protocol):
         """Get info about an active session."""
         ...
 
+    def get_session_config(self, session_id: str) -> dict[str, Any] | None:
+        """Get the mount-plan config dict for an active session."""
+        ...
+
     def list_active_sessions(self) -> list[SessionInfo]:
         """List all active sessions managed by this backend."""
         ...
@@ -233,6 +237,9 @@ class MockBackend:
 
     async def get_session_info(self, session_id: str) -> SessionInfo | None:
         return self._sessions.get(session_id)
+
+    def get_session_config(self, session_id: str) -> dict[str, Any] | None:
+        return None  # MockBackend has no real session config
 
     def list_active_sessions(self) -> list[SessionInfo]:
         return [s for s in self._sessions.values() if s.is_active]
@@ -890,6 +897,13 @@ class FoundationBackend:
             project_id=handle.project_id,
             working_dir=str(handle.working_dir),
         )
+
+    def get_session_config(self, session_id: str) -> dict[str, Any] | None:
+        """Return the mount-plan config dict for a live session."""
+        handle = self._sessions.get(session_id)
+        if handle is None or handle.session is None:
+            return None
+        return getattr(handle.session, "config", None)
 
     def list_active_sessions(self) -> list[SessionInfo]:
         return [
