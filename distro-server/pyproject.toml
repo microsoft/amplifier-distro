@@ -51,7 +51,7 @@ amp-distro = "amplifier_distro.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-amplifier_distro = ["**/*.html"]
+amplifier_distro = ["**/*.html", "**/*.js", "**/*.mjs", "**/*.svg"]
 
 # -- Code Quality ----------------------------------------------
 [tool.ruff]
