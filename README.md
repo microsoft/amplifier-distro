@@ -15,7 +15,7 @@ with shared memory across all of them.
 ## Install
 
 ```bash
-uv tool install git+https://github.com/microsoft/amplifier-distro#subdirectory=distro-server
+curl -fsSL https://raw.githubusercontent.com/microsoft/amplifier-distro/main/install.sh | bash
 ```
 
 ### Developer
