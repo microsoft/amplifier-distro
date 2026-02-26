@@ -172,6 +172,41 @@ class TestBasicTranslations:
         assert msg["session_id"] == "sess-child"
         assert msg["parent_id"] == "sess-parent"
 
+    def test_tool_post_dict_shape_success(self):
+        # Regression: kernel serializes ToolResult to dict via .model_dump()
+        # before emitting tool:post. Handler must handle both dict and object shapes.
+        msg = self.t.translate(
+            "tool:post",
+            {
+                "tool_call_id": "tc-001",
+                "result": {"output": "file contents", "error": None},
+            },
+        )
+        assert msg == {
+            "type": "tool_result",
+            "tool_call_id": "tc-001",
+            "success": True,
+            "output": "file contents",
+            "error": None,
+        }
+
+    def test_tool_post_dict_shape_error(self):
+        # Regression: dict shape with error field must be handled defensively.
+        msg = self.t.translate(
+            "tool:post",
+            {
+                "tool_call_id": "tc-001",
+                "result": {"output": None, "error": "File not found"},
+            },
+        )
+        assert msg == {
+            "type": "tool_result",
+            "tool_call_id": "tc-001",
+            "success": False,
+            "output": None,
+            "error": "File not found",
+        }
+
     def test_tool_error(self):
         msg = self.t.translate(
             "tool:error",

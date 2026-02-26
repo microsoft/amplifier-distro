@@ -170,8 +170,15 @@ class SessionEventTranslator:
                 # is available (not expected in normal flow; treat as success)
                 success = True
                 if result is not None:
-                    output = str(result.output) if result.output is not None else None
-                    error = result.error if hasattr(result, "error") else None
+                    # Kernel serializes ToolResult to dict via .model_dump() before emitting.
+                    # Handle both dict shape (serialized) and object shape (legacy/test).
+                    if isinstance(result, dict):
+                        raw_output = result.get("output")
+                        output = str(raw_output) if raw_output is not None else None
+                        error = result.get("error")
+                    else:
+                        output = str(result.output) if result.output is not None else None
+                        error = getattr(result, "error", None)
                     success = error is None
                 self._cycle_count += 1
                 return {
@@ -236,6 +243,24 @@ class SessionEventTranslator:
                     "options": data.get("options", []),
                     "timeout": data.get("timeout", 300),
                     "default": data.get("default", "deny"),
+                }
+
+            case "llm:response" | "provider:post":
+                # Token usage from each LLM call. Multiple may fire per turn
+                # (e.g. tool loop), so frontend accumulates across the turn.
+                usage = data.get("usage") or {}
+                input_t = usage.get("input_tokens", 0)
+                output_t = usage.get("output_tokens", 0)
+                return {
+                    "type": "token_usage",
+                    "input_tokens": input_t,
+                    "output_tokens": output_t,
+                    "total_tokens": usage.get("total_tokens", input_t + output_t),
+                    "cache_read_tokens": usage.get("cache_read_tokens"),
+                    "cache_write_tokens": usage.get("cache_write_tokens"),
+                    "model": data.get("model"),
+                    "provider": data.get("provider"),
+                    "duration_ms": data.get("duration_ms"),
                 }
 
             case _:
