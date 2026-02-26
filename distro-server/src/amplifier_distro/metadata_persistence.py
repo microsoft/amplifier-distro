@@ -1,7 +1,9 @@
 """Metadata persistence for distro server sessions.
 
-Writes metadata.json at session creation and updates it on
-orchestrator:complete.  Uses distro's own atomic_write for crash safety.
+Writes metadata.json on the first orchestrator:complete event (so
+the session directory already exists from transcript persistence) and
+updates it on every subsequent turn.  Uses distro's own atomic_write
+for crash safety.
 
 Follows the same pattern as transcript_persistence.py -- a module-level
 write helper plus a hook class registered by the backend.
@@ -30,8 +32,13 @@ def write_metadata(session_dir: Path, metadata: dict[str, Any]) -> None:
 
     Merges *metadata* on top of any existing file content so fields set
     by other writers (e.g. hooks-session-naming) are preserved.
+
+    The caller is responsible for ensuring *session_dir* exists (the
+    transcript hook creates it).  This function does NOT mkdir to avoid
+    creating a session directory before any transcript is written.
     """
-    session_dir.mkdir(parents=True, exist_ok=True)
+    if not session_dir.exists():
+        return
     metadata_path = session_dir / METADATA_FILENAME
 
     existing: dict[str, Any] = {}
@@ -47,15 +54,25 @@ def write_metadata(session_dir: Path, metadata: dict[str, Any]) -> None:
 
 
 class MetadataSaveHook:
-    """Updates metadata.json on orchestrator:complete.
+    """Writes metadata.json on orchestrator:complete.
 
-    Bumps ``turn_count`` (number of user messages in context) and
-    ``last_updated``.  Best-effort: never fails the agent loop.
+    On the first invocation, writes the initial metadata fields
+    (session_id, created, bundle, working_dir, description) that were
+    captured at session-creation time.  On every invocation, updates
+    ``turn_count`` and ``last_updated``.
+
+    Best-effort: never fails the agent loop.
     """
 
-    def __init__(self, session: Any, session_dir: Path) -> None:
+    def __init__(
+        self,
+        session: Any,
+        session_dir: Path,
+        initial_metadata: dict[str, Any] | None = None,
+    ) -> None:
         self._session = session
         self._session_dir = session_dir
+        self._initial_metadata = initial_metadata
 
     async def __call__(self, event: str, data: dict[str, Any]) -> Any:
         try:
@@ -68,27 +85,52 @@ class MetadataSaveHook:
                 1 for m in messages if isinstance(m, dict) and m.get("role") == "user"
             )
 
-            write_metadata(
-                self._session_dir,
-                {
-                    "turn_count": turn_count,
-                    "last_updated": datetime.now(tz=UTC).isoformat(),
-                },
-            )
+            updates: dict[str, Any] = {
+                "turn_count": turn_count,
+                "last_updated": datetime.now(tz=UTC).isoformat(),
+            }
+
+            # Flush initial metadata on first fire (directory now exists
+            # because TranscriptSaveHook runs at the same priority).
+            if self._initial_metadata is not None:
+                updates = {**self._initial_metadata, **updates}
+                self._initial_metadata = None
+
+            write_metadata(self._session_dir, updates)
+
+            # Bridge: emit prompt:complete so hooks-session-naming fires.
+            # Some orchestrators (e.g. loop-streaming) only emit
+            # orchestrator:complete but not prompt:complete.  The naming
+            # hook registers on prompt:complete and needs session_id in
+            # the event data.
+            session_id = getattr(self._session, "session_id", None)
+            if session_id:
+                await self._session.coordinator.hooks.emit(
+                    "prompt:complete",
+                    {**data, "session_id": session_id},
+                )
         except Exception:  # noqa: BLE001
             logger.warning("Metadata save failed", exc_info=True)
 
         return HookResult(action="continue")
 
 
-def register_metadata_hooks(session: Any, session_dir: Path) -> None:
+def register_metadata_hooks(
+    session: Any,
+    session_dir: Path,
+    initial_metadata: dict[str, Any] | None = None,
+) -> None:
     """Register metadata persistence hook on a session.
+
+    *initial_metadata*, when provided, is flushed to metadata.json on
+    the first ``orchestrator:complete`` event (alongside the transcript
+    write that creates the session directory).
 
     Safe to call on both fresh and resumed sessions.
     Silently no-ops if hooks API is unavailable.
     """
     try:
-        hook = MetadataSaveHook(session, session_dir)
+        hook = MetadataSaveHook(session, session_dir, initial_metadata)
         hooks = session.coordinator.hooks
         hooks.register(
             event="orchestrator:complete",
@@ -96,8 +138,6 @@ def register_metadata_hooks(session: Any, session_dir: Path) -> None:
             priority=_PRIORITY,
             name="bridge-metadata:orchestrator:complete",
         )
-        logger.debug(
-            "Metadata hook registered -> %s", session_dir / METADATA_FILENAME
-        )
+        logger.debug("Metadata hook registered -> %s", session_dir / METADATA_FILENAME)
     except Exception:  # noqa: BLE001
         logger.debug("Could not register metadata hooks", exc_info=True)
