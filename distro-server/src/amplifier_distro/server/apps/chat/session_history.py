@@ -3,6 +3,8 @@
 Schema (one dict per session in scan_sessions() output):
     session_id: str             — session directory name (UUID-like)
     cwd: str                    — working directory decoded from project dir name
+    parent_session_id: str|None — parent/root session id for spawned sessions
+    spawn_agent: str|None       — spawned agent name from metadata.json when present
     message_count: int          — number of transcript lines with a 'role' key
     last_user_message: str|None — last user message text, truncated to 120 chars
     last_updated: str           — ISO-format mtime of transcript.jsonl (or session dir)
@@ -26,6 +28,7 @@ from typing import Any
 
 from amplifier_distro.conventions import (
     AMPLIFIER_HOME,
+    METADATA_FILENAME,
     PROJECTS_DIR,
     SESSION_INFO_FILENAME,
     TRANSCRIPT_FILENAME,
@@ -108,6 +111,33 @@ def _read_session_meta(session_dir: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         pass
 
+    parent_session_id: str | None = None
+    spawn_agent: str | None = None
+    session_name: str | None = None
+    session_description: str | None = None
+    metadata_path = session_dir / METADATA_FILENAME
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if isinstance(metadata, dict):
+            raw_parent = metadata.get("parent_id")
+            if (
+                isinstance(raw_parent, str)
+                and raw_parent
+                and _VALID_SESSION_ID_RE.fullmatch(raw_parent)
+            ):
+                parent_session_id = raw_parent
+            raw_agent = metadata.get("agent_name")
+            if isinstance(raw_agent, str) and raw_agent:
+                spawn_agent = raw_agent
+            raw_name = metadata.get("name")
+            if isinstance(raw_name, str) and raw_name:
+                session_name = raw_name
+            raw_description = metadata.get("description")
+            if isinstance(raw_description, str) and raw_description:
+                session_description = raw_description
+    except (OSError, json.JSONDecodeError):
+        pass
+
     transcript_path = session_dir / TRANSCRIPT_FILENAME
 
     message_count = 0
@@ -153,6 +183,10 @@ def _read_session_meta(session_dir: Path) -> dict[str, Any]:
         "last_updated": last_updated,
         "revision": revision,
         "cwd_from_info": cwd_from_info,  # verbatim CWD if available
+        "parent_session_id": parent_session_id,
+        "spawn_agent": spawn_agent,
+        "name": session_name,
+        "description": session_description,
     }
 
 
@@ -266,25 +300,42 @@ def scan_sessions(amplifier_home: str | None = None) -> list[dict[str, Any]]:
 def scan_session_revisions(
     session_ids: set[str] | None = None,
     amplifier_home: str | None = None,
-) -> list[dict[str, str]]:
-    """Return lightweight revision metadata for session directories on disk."""
+) -> list[dict[str, Any]]:
+    """Return lightweight revision metadata for session directories on disk.
+
+    Includes name/description from metadata.json so the frontend can update
+    session titles without a full history fetch.
+    """
     home = amplifier_home or _get_amplifier_home()
     projects_path = Path(home).expanduser() / PROJECTS_DIR
     wanted = set(session_ids) if session_ids is not None else None
 
-    rows: list[dict[str, str]] = []
+    rows: list[dict[str, Any]] = []
     for session_dir in _iter_session_dirs(projects_path):
         session_id = session_dir.name
         if wanted is not None and session_id not in wanted:
             continue
         last_updated, revision = _session_revision_signature(session_dir)
-        rows.append(
-            {
-                "session_id": session_id,
-                "last_updated": last_updated,
-                "revision": revision,
-            }
-        )
+        row: dict[str, Any] = {
+            "session_id": session_id,
+            "last_updated": last_updated,
+            "revision": revision,
+        }
+        # Read name/description from metadata.json for live title updates
+        metadata_path = session_dir / METADATA_FILENAME
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if isinstance(metadata, dict):
+                if isinstance(metadata.get("name"), str) and metadata["name"]:
+                    row["name"] = metadata["name"]
+                if (
+                    isinstance(metadata.get("description"), str)
+                    and metadata["description"]
+                ):
+                    row["description"] = metadata["description"]
+        except (OSError, json.JSONDecodeError):
+            pass
+        rows.append(row)
 
     rows.sort(key=lambda s: s["last_updated"], reverse=True)
     return rows

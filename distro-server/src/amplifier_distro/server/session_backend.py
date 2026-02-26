@@ -21,6 +21,10 @@ from typing import Any, Protocol, runtime_checkable
 
 from amplifier_distro.conventions import AMPLIFIER_HOME, PROJECTS_DIR
 from amplifier_distro.features import AMPLIFIER_START_URI
+from amplifier_distro.metadata_persistence import (
+    register_metadata_hooks,
+    write_metadata,
+)
 from amplifier_distro.transcript_persistence import register_transcript_hooks
 
 logger = logging.getLogger(__name__)
@@ -496,7 +500,7 @@ class FoundationBackend:
         )
         self._sessions[session_id] = handle
 
-        # Wire transcript persistence hooks (tool:post + orchestrator:complete)
+        # Wire persistence hooks
         session_dir = (
             Path(AMPLIFIER_HOME).expanduser()
             / PROJECTS_DIR
@@ -505,6 +509,21 @@ class FoundationBackend:
             / session_id
         )
         register_transcript_hooks(session, session_dir)
+
+        # Write initial metadata.json (readers in chat/slack depend on this)
+        from datetime import UTC, datetime
+
+        write_metadata(
+            session_dir,
+            {
+                "session_id": session_id,
+                "created": datetime.now(tz=UTC).isoformat(),
+                "bundle": bundle_name or self._bundle_name,
+                "working_dir": str(wd),
+                "description": description,
+            },
+        )
+        register_metadata_hooks(session, session_dir)
 
         # Wire streaming/display/approval when event_queue provided
         if event_queue is not None:
@@ -685,7 +704,7 @@ class FoundationBackend:
             )
             self._sessions[session_id] = handle
 
-            # Wire transcript persistence hooks on reconnect too
+            # Wire persistence hooks on reconnect too
             session_dir = (
                 Path(AMPLIFIER_HOME).expanduser()
                 / PROJECTS_DIR
@@ -694,6 +713,7 @@ class FoundationBackend:
                 / session_id
             )
             register_transcript_hooks(session, session_dir)
+            register_metadata_hooks(session, session_dir)
 
             queue: asyncio.Queue = asyncio.Queue()
             self._session_queues[session_id] = queue

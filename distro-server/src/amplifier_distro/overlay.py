@@ -23,6 +23,11 @@ import yaml
 from .conventions import DISTRO_OVERLAY_DIR
 from .features import AMPLIFIER_START_URI, Provider, provider_bundle_uri
 
+SESSION_NAMING_URI = (
+    "git+https://github.com/microsoft/amplifier-foundation@main"
+    "#subdirectory=modules/hooks-session-naming"
+)
+
 
 def overlay_dir() -> Path:
     """Return the overlay bundle directory path, expanded."""
@@ -88,6 +93,7 @@ def ensure_overlay(provider: Provider) -> Path:
             "includes": [
                 {"bundle": AMPLIFIER_START_URI},
                 {"bundle": provider_bundle_uri(provider)},
+                {"bundle": SESSION_NAMING_URI},
             ],
         }
     else:
@@ -101,6 +107,9 @@ def ensure_overlay(provider: Provider) -> Path:
         prov_uri = provider_bundle_uri(provider)
         if prov_uri not in current_uris:
             includes.append({"bundle": prov_uri})
+
+        if SESSION_NAMING_URI not in current_uris:
+            includes.append({"bundle": SESSION_NAMING_URI})
 
     _write_overlay(data)
     return overlay_dir()

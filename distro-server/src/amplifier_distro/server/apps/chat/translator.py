@@ -238,5 +238,23 @@ class SessionEventTranslator:
                     "default": data.get("default", "deny"),
                 }
 
+            case "llm:response" | "provider:post":
+                # Token usage from each LLM call. Multiple may fire per turn
+                # (e.g. tool loop), so frontend accumulates across the turn.
+                usage = data.get("usage") or {}
+                input_t = usage.get("input_tokens", 0)
+                output_t = usage.get("output_tokens", 0)
+                return {
+                    "type": "token_usage",
+                    "input_tokens": input_t,
+                    "output_tokens": output_t,
+                    "total_tokens": usage.get("total_tokens", input_t + output_t),
+                    "cache_read_tokens": usage.get("cache_read_tokens"),
+                    "cache_write_tokens": usage.get("cache_write_tokens"),
+                    "model": data.get("model"),
+                    "provider": data.get("provider"),
+                    "duration_ms": data.get("duration_ms"),
+                }
+
             case _:
                 return None

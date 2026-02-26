@@ -4,15 +4,14 @@ Path constants and naming conventions for the distro experience server.
 Core CLI and bundle conventions live in amplifier-foundation's
 DIRECTORY_CONTRACT.md -- this file covers only server-specific paths.
 
-Most values are fixed conventions. AMPLIFIER_HOME and DISTRO_HOME can be
-overridden via environment variables.
+Most values are fixed conventions. DISTRO_HOME can be overridden via
+the AMPLIFIER_DISTRO_HOME environment variable.
 """
 
 import os
 
 # --- The Root ---
-# Override with AMPLIFIER_HOME env var.
-AMPLIFIER_HOME = os.environ.get("AMPLIFIER_HOME", "~/.amplifier")
+AMPLIFIER_HOME = "~/.amplifier"
 
 
 # --- Keys & Settings ---
@@ -39,6 +38,7 @@ WORK_LOG_FILENAME = "work-log.yaml"
 # --- Sessions ---
 TRANSCRIPT_FILENAME = "transcript.jsonl"
 SESSION_INFO_FILENAME = "session-info.json"
+METADATA_FILENAME = "metadata.json"
 PROJECTS_DIR = "projects"  # relative to AMPLIFIER_HOME
 
 # --- Server ---

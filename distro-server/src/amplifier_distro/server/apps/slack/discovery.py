@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from amplifier_distro.conventions import METADATA_FILENAME
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,11 +58,7 @@ class AmplifierDiscovery:
     scanning ~/.amplifier/projects/ for session directories.
     """
 
-    def __init__(self, amplifier_home: str | None = None) -> None:
-        if amplifier_home is None:
-            from amplifier_distro.conventions import AMPLIFIER_HOME
-
-            amplifier_home = AMPLIFIER_HOME
+    def __init__(self, amplifier_home: str = "~/.amplifier") -> None:
         self._home = Path(amplifier_home).expanduser()
         self._projects_dir = self._home / "projects"
 
@@ -125,7 +123,7 @@ class AmplifierDiscovery:
                 # Load metadata if available
                 name = ""
                 description = ""
-                metadata_file = session_dir / "metadata.json"
+                metadata_file = session_dir / METADATA_FILENAME
                 if metadata_file.exists():
                     try:
                         meta = json.loads(metadata_file.read_text())
@@ -177,7 +175,7 @@ class AmplifierDiscovery:
 
                     name = ""
                     description = ""
-                    metadata_file = session_dir / "metadata.json"
+                    metadata_file = session_dir / METADATA_FILENAME
                     if metadata_file.exists():
                         try:
                             meta = json.loads(metadata_file.read_text())

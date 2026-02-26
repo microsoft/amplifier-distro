@@ -365,6 +365,41 @@
     .session-dir-items {
       padding-left: 12px;
     }
+    .session-tree-node {
+      width: 100%;
+    }
+    .session-tree-row {
+      display: flex;
+      align-items: stretch;
+      min-width: 0;
+    }
+    .session-tree-card-wrap {
+      flex: 1;
+      min-width: 0;
+    }
+    .session-tree-toggle {
+      width: 20px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      flex-shrink: 0;
+    }
+    .session-tree-toggle:hover {
+      color: var(--text-primary);
+    }
+    .session-tree-spacer {
+      width: 20px;
+      flex-shrink: 0;
+      display: inline-block;
+    }
+    .session-tree-children {
+      margin-left: 2px;
+    }
     .new-session-cwd-label {
       font-size: 10px;
       font-weight: 600;
@@ -399,6 +434,23 @@
       gap: 6px;
       min-width: 0;
     }
+    .session-meta-link {
+      width: 100%;
+      border: none;
+      background: transparent;
+      padding: 0;
+      text-align: left;
+      color: inherit;
+      cursor: pointer;
+      font: inherit;
+      line-height: inherit;
+    }
+    .session-meta-link:hover .session-meta-value-link {
+      text-decoration-color: currentColor;
+    }
+    .session-meta-link.pending {
+      opacity: 0.65;
+    }
     .session-meta-key {
       color: var(--text-muted);
       min-width: 34px;
@@ -411,6 +463,12 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    .session-meta-value-link {
+      color: var(--accent-blue);
+      text-decoration: underline;
+      text-decoration-color: rgba(37, 99, 235, 0.45);
+      text-underline-offset: 2px;
     }
     .active-cwd-display {
       font-size: 11px;
@@ -683,6 +741,17 @@
     .tool-header:hover { background: var(--bg-tertiary); }
     .tool-status { font-size: 13px; flex-shrink: 0; }
     .tool-name { font-weight: 500; color: var(--text-primary); }
+    .token-usage-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 2px 0 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+      opacity: 0.75;
+      font-variant-numeric: tabular-nums;
+    }
+    .token-usage-pill .tok-sep { color: var(--border); }
     .tool-origin-badge {
       font-size: 10px;
       letter-spacing: 0.01em;
@@ -953,6 +1022,12 @@
     return trimmed || '~';
   }
 
+  function normalizeSessionParentId(value) {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+
   function sessionUpdatedTs(session) {
     return Date.parse((session && session.lastUpdated) || '') || 0;
   }
@@ -966,6 +1041,39 @@
     if (cwdA < cwdB) return -1;
     if (cwdA > cwdB) return 1;
     return keyA.localeCompare(keyB);
+  }
+
+  function buildSessionTree(entries) {
+    const keyBySessionId = new Map();
+    for (const [key, session] of entries) {
+      const sid = session && typeof session.sessionId === 'string' ? session.sessionId : '';
+      if (sid) keyBySessionId.set(sid, key);
+    }
+
+    const roots = [];
+    const childrenByParentKey = new Map();
+    for (const entry of entries) {
+      const [key, session] = entry;
+      const parentSessionId = normalizeSessionParentId(session && session.parentSessionId);
+      const parentKey = parentSessionId ? keyBySessionId.get(parentSessionId) : null;
+      if (!parentKey || parentKey === key) {
+        roots.push(entry);
+        continue;
+      }
+      const existing = childrenByParentKey.get(parentKey);
+      if (existing) {
+        existing.push(entry);
+      } else {
+        childrenByParentKey.set(parentKey, [entry]);
+      }
+    }
+
+    roots.sort(compareSessionEntriesByRecent);
+    for (const children of childrenByParentKey.values()) {
+      children.sort(compareSessionEntriesByRecent);
+    }
+
+    return { roots, childrenByParentKey };
   }
 
   function sessionMatchesFilter(sessionKey, session, rawQuery) {
@@ -991,6 +1099,8 @@
       s.status,
       s.turnCount,
       s.messageCount,
+      s.parentSessionId,
+      s.spawnAgent,
     ]
       .filter(v => v !== null && v !== undefined && v !== '')
       .map(v => String(v).toLowerCase())
@@ -1295,6 +1405,26 @@
     `;
   }
 
+  function TokenUsagePill({ tokens }) {
+    if (!tokens) return null;
+    const fmt = n => n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n || 0);
+    const parts = [
+      `↑ ${fmt(tokens.input_tokens)} in`,
+      `↓ ${fmt(tokens.output_tokens)} out`,
+    ];
+    if (tokens.cache_read_tokens > 0) {
+      parts.push(`${fmt(tokens.cache_read_tokens)} cached`);
+    }
+    return html`
+      <div class="token-usage-pill">
+        ${parts.map((p, i) => [
+          html`<span>${p}</span>`,
+          i < parts.length - 1 ? html`<span class="tok-sep">·</span>` : null,
+        ])}
+      </div>
+    `;
+  }
+
   function ChronoItem({ item, isActivity }) {
     if (item.type === 'text') {
       const cls = 'text-block'
@@ -1312,6 +1442,9 @@
     }
     if (item.type === 'tool_call') {
       return html`<${ToolCallCard} item=${item} isActivity=${isActivity} />`;
+    }
+    if (item.type === 'token_usage') {
+      return html`<${TokenUsagePill} tokens=${item.tokens} />`;
     }
     return null;
   }
@@ -1476,7 +1609,8 @@
       : `turn ${session.turnCount || 0}`;
     const preview = session.lastUserMessage || null;
     const sessionName =
-      session.bundle
+      session.name
+      || session.bundle
       || (
         session.source !== 'history' && (session.turnCount || 0) === 0
           ? 'new session'
@@ -1740,7 +1874,8 @@
     const [sessionFilterQuery, setSessionFilterQuery] = useState('');
     const [showSessionFilter, setShowSessionFilter] = useState(false);
     const [collapsedDirGroups, setCollapsedDirGroups] = useState({});
-    const [sessionPanelWidth, setSessionPanelWidth] = useState(260);
+    const [collapsedSpawnGroups, setCollapsedSpawnGroups] = useState({});
+    const [sessionPanelWidth, setSessionPanelWidth] = useState(300);
     const [activityPanelWidth, setActivityPanelWidth] = useState(460);
     const [draggingPane, setDraggingPane] = useState(null);
     const [theme, setTheme] = useState(() => {
@@ -1766,6 +1901,7 @@
     const toolMapRef = useRef({});
     const childToToolRef = useRef({});
     const childAgentRef = useRef({});
+    const sessionParentByIdRef = useRef({});
     const activeKeyRef = useRef(null);
     const sessionsRef = useRef(new Map());
     const chronoItemsRef = useRef([]);
@@ -1774,6 +1910,8 @@
     const pendingEventsRef = useRef(new Map());
     const historyResumeTokenRef = useRef(0);
     const dragStateRef = useRef(null);
+    // Accumulates token usage across LLM calls within a single turn
+    const turnTokensRef = useRef(null);
     const revisionPollInFlightRef = useRef(false);
     const historySyncInFlightRef = useRef(false);
     const historyDiscoverInFlightRef = useRef(false);
@@ -1905,6 +2043,40 @@
       return maxOrder + 1;
     }
 
+    const applySessionForkLineage = useCallback((msg) => {
+      const childId = normalizeSessionParentId(msg && msg.child_id);
+      const parentId = normalizeSessionParentId(msg && msg.parent_id);
+      const childAgent = typeof msg?.agent === 'string' && msg.agent ? msg.agent : null;
+
+      if (childId && childAgent) {
+        childAgentRef.current[childId] = childAgent;
+      }
+      if (childId && parentId) {
+        sessionParentByIdRef.current[childId] = parentId;
+      }
+      if (!childId) return;
+
+      setSessions(prev => {
+        let changed = false;
+        const next = new Map(prev);
+        for (const [key, session] of next.entries()) {
+          if (!session || session.sessionId !== childId) continue;
+          const nextParent = parentId || session.parentSessionId || null;
+          const nextAgent = childAgent || session.spawnAgent || null;
+          if (nextParent === session.parentSessionId && nextAgent === session.spawnAgent) {
+            continue;
+          }
+          next.set(key, {
+            ...session,
+            parentSessionId: nextParent,
+            spawnAgent: nextAgent,
+          });
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }, []);
+
     // —— WebSocket event handler ————————————————————————————————————
     const handleWsMessage = useCallback((msg, sourceKey = null) => {
       const ownerKey = sourceKey || activeKeyRef.current;
@@ -1918,6 +2090,10 @@
           setSessions(prev => {
             const next = new Map(prev);
             const s = next.get(ownerKey) || {};
+            const parentSessionId = normalizeSessionParentId(
+              sessionParentByIdRef.current[msg.session_id] || s.parentSessionId
+            );
+            const spawnAgent = childAgentRef.current[msg.session_id] || s.spawnAgent || null;
             next.set(ownerKey, {
               ...s,
               sessionId: msg.session_id,
@@ -1928,6 +2104,8 @@
               lastUpdated: s.lastUpdated || nowIso,
               hasExternalUpdate: false,
               isNewSession: false,
+              parentSessionId,
+              spawnAgent,
             });
             return next;
           });
@@ -1985,6 +2163,10 @@
           });
         }
 
+        if (msg.type === 'session_fork') {
+          applySessionForkLineage(msg);
+        }
+
         if (msg.type !== 'auth_ok' && msg.type !== 'pong' && msg.type !== 'prompt_complete') {
           const queued = pendingEventsRef.current.get(ownerKey) || [];
           queued.push(msg);
@@ -2007,6 +2189,10 @@
           setSessions(prev => {
             const next = new Map(prev);
             const s = next.get(ownerKey) || {};
+            const parentSessionId = normalizeSessionParentId(
+              sessionParentByIdRef.current[msg.session_id] || s.parentSessionId
+            );
+            const spawnAgent = childAgentRef.current[msg.session_id] || s.spawnAgent || null;
             next.set(ownerKey, {
               ...s,
               sessionId: msg.session_id,
@@ -2018,6 +2204,8 @@
               lastUpdated: s.lastUpdated || nowIso,
               hasExternalUpdate: false,
               isNewSession: false,
+              parentSessionId,
+              spawnAgent,
             });
             return next;
           });
@@ -2125,6 +2313,21 @@
           break;
         }
 
+        case 'token_usage': {
+          // Accumulate across multiple LLM calls in the same turn (tool loops)
+          const prev = turnTokensRef.current || {};
+          turnTokensRef.current = {
+            input_tokens:       (prev.input_tokens  || 0) + (msg.input_tokens  || 0),
+            output_tokens:      (prev.output_tokens || 0) + (msg.output_tokens || 0),
+            total_tokens:       (prev.total_tokens  || 0) + (msg.total_tokens  || 0),
+            cache_read_tokens:  (prev.cache_read_tokens  || 0) + (msg.cache_read_tokens  || 0),
+            cache_write_tokens: (prev.cache_write_tokens || 0) + (msg.cache_write_tokens || 0),
+            model:    msg.model    || prev.model,
+            provider: msg.provider || prev.provider,
+          };
+          break;
+        }
+
         case 'tool_call': {
           const itemId = makeId();
           const originSessionId = typeof msg.session_id === 'string' ? msg.session_id : null;
@@ -2161,10 +2364,7 @@
         case 'session_fork': {
           const parentToolId = toolMapRef.current[msg.parent_tool_call_id];
           const childId = typeof msg.child_id === 'string' ? msg.child_id : null;
-          const childAgent = typeof msg.agent === 'string' ? msg.agent : null;
-          if (childId && childAgent) {
-            childAgentRef.current[childId] = childAgent;
-          }
+          applySessionForkLineage(msg);
           if (parentToolId) {
             if (childId) childToToolRef.current[childId] = parentToolId;
           }
@@ -2214,6 +2414,17 @@
             });
             setExecuting(false);
             setTurnCount(nextTurn ?? (turnCountRef.current + 1));
+          }
+          // Flush accumulated token usage as a chrono item
+          if (turnTokensRef.current && (turnTokensRef.current.total_tokens || 0) > 0) {
+            const snapTokens = turnTokensRef.current;
+            setChronoItems(prev => [...prev, {
+              id: makeId(),
+              type: 'token_usage',
+              order: orderCounterRef.current++,
+              tokens: snapTokens,
+            }]);
+            turnTokensRef.current = null;
           }
           blockMapRef.current = {};
           cycleRef.current = 0;
@@ -2272,7 +2483,7 @@
         default:
           break;
       }
-    }, []);
+    }, [applySessionForkLineage]);
 
     // —— WebSocket connection ————————————————————————————————————————
     const connect = useCallback((sessionKey) => {
@@ -2395,6 +2606,20 @@
 
               const sessionId = s.session_id;
               const revision = typeof s.revision === 'string' ? s.revision : null;
+              const parentSessionId = normalizeSessionParentId(
+                s.parent_session_id || sessionParentByIdRef.current[sessionId]
+              );
+              const spawnAgent = (
+                (typeof s.spawn_agent === 'string' && s.spawn_agent)
+                || childAgentRef.current[sessionId]
+                || null
+              );
+              if (parentSessionId) {
+                sessionParentByIdRef.current[sessionId] = parentSessionId;
+              }
+              if (spawnAgent) {
+                childAgentRef.current[sessionId] = spawnAgent;
+              }
               const existingKey = sessionKeyById.get(sessionId);
 
               if (!existingKey) {
@@ -2416,10 +2641,14 @@
                   messageCount,
                   lastUserMessage: s.last_user_message || null,
                   lastUpdated: s.last_updated || null,
+                  name: s.name || null,
+                  description: s.description || null,
                   knownRevision: badgeNew ? null : revision,
                   remoteRevision: revision,
                   hasExternalUpdate: badgeNew,
                   isNewSession: badgeNew,
+                  parentSessionId,
+                  spawnAgent,
                 });
                 sessionKeyById.set(sessionId, historyKey);
                 changed = true;
@@ -2455,6 +2684,10 @@
               const nextCwd = s.cwd || cur.cwd || '~';
               const nextLastUserMessage = s.last_user_message || cur.lastUserMessage || null;
               const nextLastUpdated = s.last_updated || cur.lastUpdated || null;
+              const nextParentSessionId = parentSessionId || cur.parentSessionId || null;
+              const nextSpawnAgent = spawnAgent || cur.spawnAgent || null;
+              const nextName = s.name || cur.name || null;
+              const nextDescription = s.description || cur.description || null;
 
               const rowChanged =
                 nextCwd !== cur.cwd
@@ -2467,7 +2700,11 @@
                 || nextSource !== cur.source
                 || nextStatus !== cur.status
                 || nextTurnCount !== cur.turnCount
-                || nextSavedTurnCount !== cur.savedTurnCount;
+                || nextSavedTurnCount !== cur.savedTurnCount
+                || nextParentSessionId !== cur.parentSessionId
+                || nextSpawnAgent !== cur.spawnAgent
+                || nextName !== cur.name
+                || nextDescription !== cur.description;
 
               if (!rowChanged) continue;
 
@@ -2484,6 +2721,10 @@
                 knownRevision,
                 remoteRevision,
                 hasExternalUpdate,
+                parentSessionId: nextParentSessionId,
+                spawnAgent: nextSpawnAgent,
+                name: nextName,
+                description: nextDescription,
               });
               changed = true;
             }
@@ -2541,7 +2782,9 @@
     useEffect(() => {
       if (sessionSortMode !== 'directory') return;
       const groupKeys = new Set();
-      for (const session of sessions.values()) {
+      const allEntries = Array.from(sessions.entries());
+      const tree = buildSessionTree(allEntries);
+      for (const [, session] of tree.roots) {
         groupKeys.add(normalizeCwd(session && session.cwd));
       }
       setCollapsedDirGroups(prev => {
@@ -2563,6 +2806,43 @@
       });
     }, [sessionSortMode, sessions]);
 
+    useEffect(() => {
+      const allEntries = Array.from(sessions.entries());
+      const tree = buildSessionTree(allEntries);
+      const parentIds = new Set();
+      for (const [key, session] of tree.roots) {
+        const children = tree.childrenByParentKey.get(key) || [];
+        if (!children.length) continue;
+        const sid = session && session.sessionId ? session.sessionId : key;
+        parentIds.add(sid);
+      }
+      for (const children of tree.childrenByParentKey.values()) {
+        for (const [key, session] of children) {
+          const grandchildren = tree.childrenByParentKey.get(key) || [];
+          if (!grandchildren.length) continue;
+          const sid = session && session.sessionId ? session.sessionId : key;
+          parentIds.add(sid);
+        }
+      }
+      setCollapsedSpawnGroups(prev => {
+        const next = { ...prev };
+        let changed = false;
+        for (const sid of parentIds) {
+          if (!(sid in next)) {
+            next[sid] = true;
+            changed = true;
+          }
+        }
+        for (const sid of Object.keys(next)) {
+          if (!parentIds.has(sid)) {
+            delete next[sid];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, [sessions]);
+
     const toggleDirGroup = useCallback((groupKey) => {
       setCollapsedDirGroups(prev => {
         const current = Object.prototype.hasOwnProperty.call(prev, groupKey)
@@ -2571,6 +2851,18 @@
         return {
           ...prev,
           [groupKey]: !current,
+        };
+      });
+    }, []);
+
+    const toggleSpawnGroup = useCallback((parentId) => {
+      setCollapsedSpawnGroups(prev => {
+        const current = Object.prototype.hasOwnProperty.call(prev, parentId)
+          ? !!prev[parentId]
+          : true;
+        return {
+          ...prev,
+          [parentId]: !current,
         };
       });
     }, []);
@@ -3193,12 +3485,17 @@
                 ? (remoteRevision !== null)   // never reviewed: badge if has content
                 : currentKnown !== remoteRevision; // reviewed before: badge if changed
               const nextUpdatedAt = row.last_updated || session.lastUpdated || null;
+              // Pick up name/description from revision scan (written by naming hook)
+              const nextName = row.name || session.name || null;
+              const nextDescription = row.description || session.description || null;
 
               if (
                 session.remoteRevision === remoteRevision
                 && session.knownRevision === nextKnown
                 && !!session.hasExternalUpdate === hasExternalUpdate
                 && session.lastUpdated === nextUpdatedAt
+                && session.name === nextName
+                && session.description === nextDescription
               ) {
                 continue;
               }
@@ -3209,6 +3506,8 @@
                 knownRevision: nextKnown,
                 hasExternalUpdate,
                 lastUpdated: nextUpdatedAt,
+                name: nextName,
+                description: nextDescription,
               });
               changed = true;
             }
@@ -3324,18 +3623,77 @@
     const filteredSessionEntries = sessionEntries.filter(([key, session]) =>
       sessionMatchesFilter(key, session, sessionFilterQuery)
     );
-    const sessionList = filteredSessionEntries.slice().sort(compareSessionEntriesByRecent);
+    const sessionTree = buildSessionTree(filteredSessionEntries);
+    const rootSessionEntries = sessionTree.roots;
+    const sessionKeyBySessionId = new Map(
+      sessionEntries
+        .filter(([, session]) => session && session.sessionId)
+        .map(([key, session]) => [session.sessionId, key])
+    );
+
+    const renderSessionTreeEntry = (entry, depth = 0, lineage = new Set()) => {
+      const [key, session] = entry;
+      const cycleDetected = lineage.has(key);
+      const children = cycleDetected
+        ? []
+        : (sessionTree.childrenByParentKey.get(key) || []);
+      const hasChildren = children.length > 0;
+      const collapseKey = (session && session.sessionId) || key;
+      const collapsed = hasChildren
+        ? (collapsedSpawnGroups[collapseKey] !== false)
+        : false;
+      const nextLineage = new Set(lineage);
+      nextLineage.add(key);
+      return html`
+        <div class="session-tree-node" key=${'tree-' + key}>
+          <div
+            class="session-tree-row"
+            style=${depth > 0 ? { marginLeft: (Math.min(depth, 8) * 12) + 'px' } : null}
+          >
+            ${hasChildren
+              ? html`
+                  <button
+                    class="session-tree-toggle"
+                    title=${collapsed ? 'Show spawned sessions' : 'Hide spawned sessions'}
+                    onClick=${e => {
+                      e.stopPropagation();
+                      toggleSpawnGroup(collapseKey);
+                    }}
+                  >
+                    <${Icon} name=${collapsed ? 'chevron-right' : 'chevron-down'} className="sm" />
+                  </button>
+                `
+              : html`<span class="session-tree-spacer"></span>`
+            }
+            <div class="session-tree-card-wrap">
+              <${SessionCard}
+                key=${key}
+                session=${session}
+                isActive=${key === activeKey}
+                onClick=${() => switchSession(key)}
+              />
+            </div>
+          </div>
+          ${hasChildren && !collapsed && html`
+            <div class="session-tree-children">
+              ${children.map(child => renderSessionTreeEntry(child, depth + 1, nextLineage))}
+            </div>
+          `}
+        </div>
+      `;
+    };
+
     const directoryGroups = (() => {
       const groupsByDir = new Map();
-      for (const entry of filteredSessionEntries) {
-        const [sessionKey, session] = entry;
+      for (const entry of rootSessionEntries) {
+        const [, session] = entry;
         const cwd = normalizeCwd(session && session.cwd);
         let group = groupsByDir.get(cwd);
         if (!group) {
           group = { key: cwd, cwd, items: [], latestTs: 0 };
           groupsByDir.set(cwd, group);
         }
-        group.items.push([sessionKey, session]);
+        group.items.push(entry);
         const ts = sessionUpdatedTs(session);
         if (ts > group.latestTs) group.latestTs = ts;
       }
@@ -3356,6 +3714,12 @@
     const showSyncButton = syncingHistory || pendingHistorySyncCount > 0;
     const activeSession = activeKey ? sessions.get(activeKey) : null;
     const activeSessionId = (activeSession && activeSession.sessionId) || sessionId || null;
+    const activeParentSessionId = normalizeSessionParentId(
+      activeSession && activeSession.parentSessionId
+    );
+    const activeParentKey = activeParentSessionId
+      ? (sessionKeyBySessionId.get(activeParentSessionId) || null)
+      : null;
     const showDraftCwdEditor =
       !!activeSession
       && activeSession.source !== 'history'
@@ -3503,27 +3867,13 @@
                       </button>
                       ${!collapsed && html`
                         <div class="session-dir-items">
-                          ${group.items.map(([key, sess]) => html`
-                            <${SessionCard}
-                              key=${key}
-                              session=${sess}
-                              isActive=${key === activeKey}
-                              onClick=${() => switchSession(key)}
-                            />
-                          `)}
+                          ${group.items.map(entry => renderSessionTreeEntry(entry))}
                         </div>
                       `}
                     </div>
                   `;
                 })
-              : sessionList.map(([key, sess]) => html`
-                <${SessionCard}
-                  key=${key}
-                  session=${sess}
-                  isActive=${key === activeKey}
-                  onClick=${() => switchSession(key)}
-                />
-              `)
+              : rootSessionEntries.map(entry => renderSessionTreeEntry(entry))
             }
           </div>
           <div class="session-actions">
@@ -3555,6 +3905,25 @@
                               <span class="session-meta-key">sid</span>
                               <span class="session-meta-value">${activeSessionId || 'pending'}</span>
                             </div>
+                            ${activeParentSessionId && html`
+                              <button
+                                class=${'session-meta-row session-meta-link' + (activeParentKey ? '' : ' pending')}
+                                title=${activeParentKey
+                                  ? ('Jump to parent session ' + activeParentSessionId)
+                                  : ('Parent session ' + activeParentSessionId + ' is not loaded yet')}
+                                onClick=${() => {
+                                  if (activeParentKey) {
+                                    switchSession(activeParentKey);
+                                  } else {
+                                    syncSessionHistory({ silent: false });
+                                  }
+                                }}
+                              >
+                                <${Icon} name="chevron-up" className="sm" />
+                                <span class="session-meta-key">parent</span>
+                                <span class="session-meta-value session-meta-value-link">${activeParentSessionId}</span>
+                              </button>
+                            `}
                             <div class="session-meta-row">
                               <span class="session-meta-key">turn</span>
                               <span class="session-meta-value">${turnCount}</span>
