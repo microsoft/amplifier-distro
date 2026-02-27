@@ -76,3 +76,93 @@ class TestFreshOverlayDoesNotInjectSessionNaming:
         assert expected in uris, (
             f"Fresh overlay must include provider URI: {expected!r}"
         )
+
+
+class TestStaleOverlayMigration:
+    """ensure_overlay must strip the stale SESSION_NAMING_URI from existing overlays."""
+
+    def test_stale_session_naming_uri_removed_on_update(self, overlay_path):
+        """Stale session-naming URI must be stripped when updating an existing
+        overlay."""
+        stale_data = {
+            "bundle": {
+                "name": "amplifier-distro",
+                "version": "0.1.0",
+                "description": "Local Amplifier Distro environment",
+            },
+            "includes": [
+                {"bundle": _STALE_URI},
+                {"bundle": AMPLIFIER_START_URI},
+                {"bundle": provider_bundle_uri(_ANTHROPIC)},
+            ],
+        }
+        overlay_path.write_text(
+            yaml.dump(stale_data, default_flow_style=False, sort_keys=False)
+        )
+        overlay.ensure_overlay(_ANTHROPIC)
+        data = yaml.safe_load(overlay_path.read_text()) or {}
+        uris = overlay.get_includes(data)
+        assert _STALE_URI not in uris, (
+            "Stale session-naming URI must be removed from existing overlay: "
+            f"{_STALE_URI!r}"
+        )
+
+    def test_migration_preserves_valid_includes(self, overlay_path):
+        """Valid includes must be preserved when migration strips the stale URI."""
+        stale_data = {
+            "bundle": {
+                "name": "amplifier-distro",
+                "version": "0.1.0",
+                "description": "Local Amplifier Distro environment",
+            },
+            "includes": [
+                {"bundle": _STALE_URI},
+                {"bundle": AMPLIFIER_START_URI},
+                {"bundle": provider_bundle_uri(_ANTHROPIC)},
+            ],
+        }
+        overlay_path.write_text(
+            yaml.dump(stale_data, default_flow_style=False, sort_keys=False)
+        )
+        overlay.ensure_overlay(_ANTHROPIC)
+        data = yaml.safe_load(overlay_path.read_text()) or {}
+        uris = overlay.get_includes(data)
+        assert AMPLIFIER_START_URI in uris, (
+            "AMPLIFIER_START_URI must be preserved after migration: "
+            f"{AMPLIFIER_START_URI!r}"
+        )
+        assert provider_bundle_uri(_ANTHROPIC) in uris, (
+            "Provider bundle URI must be preserved after migration: "
+            f"{provider_bundle_uri(_ANTHROPIC)!r}"
+        )
+
+    def test_clean_overlay_unaffected_by_migration(self, overlay_path):
+        """A clean overlay (no stale URI) must remain correct after ensure_overlay."""
+        clean_data = {
+            "bundle": {
+                "name": "amplifier-distro",
+                "version": "0.1.0",
+                "description": "Local Amplifier Distro environment",
+            },
+            "includes": [
+                {"bundle": AMPLIFIER_START_URI},
+                {"bundle": provider_bundle_uri(_ANTHROPIC)},
+            ],
+        }
+        overlay_path.write_text(
+            yaml.dump(clean_data, default_flow_style=False, sort_keys=False)
+        )
+        overlay.ensure_overlay(_ANTHROPIC)
+        data = yaml.safe_load(overlay_path.read_text()) or {}
+        uris = overlay.get_includes(data)
+        assert _STALE_URI not in uris, (
+            "Clean overlay must not contain stale URI after ensure_overlay: "
+            f"{_STALE_URI!r}"
+        )
+        assert AMPLIFIER_START_URI in uris, (
+            f"AMPLIFIER_START_URI must still be present: {AMPLIFIER_START_URI!r}"
+        )
+        assert provider_bundle_uri(_ANTHROPIC) in uris, (
+            "Provider bundle URI must still be present: "
+            f"{provider_bundle_uri(_ANTHROPIC)!r}"
+        )
