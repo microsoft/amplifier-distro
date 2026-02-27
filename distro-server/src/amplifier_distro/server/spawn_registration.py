@@ -23,15 +23,24 @@ logger = logging.getLogger(__name__)
 _CHILD_BUNDLE_VERSION = "1.0.0"
 
 
-def register_spawning(session: Any, prepared: Any, session_id: str) -> None:
+def register_spawning(
+    session: Any,
+    prepared: Any,
+    session_id: str,
+    exclude_tools: list[str] | None = None,
+) -> None:
     """Register ``session.spawn`` capability on *session*'s coordinator.
 
     Args:
-        session:    AmplifierSession whose coordinator receives the capability.
-        prepared:   PreparedBundle used to create *session*. Its ``spawn()``
-                    method and ``bundle.agents`` registry are used for
-                    sub-session creation.
-        session_id: ID of *session* (for logging only).
+        session:       AmplifierSession whose coordinator receives the capability.
+        prepared:      PreparedBundle used to create *session*. Its ``spawn()``
+                       method and ``bundle.agents`` registry are used for
+                       sub-session creation.
+        session_id:    ID of *session* (for logging only).
+        exclude_tools: Tool module names to remove from every child bundle's
+                       tool list.  Pass ``["delegate"]`` for voice sessions to
+                       prevent recursive delegation loops
+                       (voice → agent → voice → agent ...).
     """
     # Deferred import: amplifier_foundation is an optional runtime dependency.
     # Importing at module level would break if foundation is not installed.
@@ -109,12 +118,34 @@ def register_spawning(session: Any, prepared: Any, session_id: str) -> None:
 
         # --- Build child Bundle from config --------------------------------
         # Bundle is imported above in register_spawning scope, visible here
+
+        # Apply exclude_tools filter: remove any tool whose module name matches
+        # an excluded name (exact match, or "<name>" suffix of "tool-<name>").
+        tools: list[Any] = config.get("tools", [])
+        if exclude_tools:
+            _excluded: list[str] = exclude_tools  # non-None for closure capture
+
+            def _is_excluded(tool_entry: Any) -> bool:
+                module = (
+                    tool_entry.get("module", "")
+                    if isinstance(tool_entry, dict)
+                    else str(tool_entry)
+                )
+                return any(
+                    module == name
+                    or module == f"tool-{name}"
+                    or module.endswith(f"-{name}")
+                    for name in _excluded
+                )
+
+            tools = [t for t in tools if not _is_excluded(t)]
+
         child_bundle = Bundle(
             name=agent_name,
             version=_CHILD_BUNDLE_VERSION,
             session=config.get("session", {}),
             providers=config.get("providers", []),
-            tools=config.get("tools", []),
+            tools=tools,
             hooks=config.get("hooks", []),
             instruction=(
                 config.get("instruction") or config.get("system", {}).get("instruction")

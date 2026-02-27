@@ -44,9 +44,6 @@ class TestVoiceImportHealth:
     def test_voice_realtime_imports_without_error(self) -> None:
         import amplifier_distro.server.apps.voice.realtime  # noqa: F401
 
-    def test_voice_translator_imports_without_error(self) -> None:
-        import amplifier_distro.server.apps.voice.translator  # noqa: F401
-
     def test_server_app_imports_without_error(self) -> None:
         import amplifier_distro.server.app  # noqa: F401
 

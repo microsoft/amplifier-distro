@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Amplifier Voice</title>
 <script src="/apps/voice/static/vendor.js"></script>
+<script src="/apps/voice/static/connection-health.mjs"></script>
 <style>
 /* ------------------------------------------------------------------ */
 /*  CSS: dark theme, system-ui font, flex column layout, 900px max     */
@@ -821,6 +822,9 @@ body {
     // Tracks the ID of the in-progress user bubble (created on speech_started,
     // filled on transcription.completed).
     const streamingUserBubbleId = useRef(null);
+    // Tracks current audio output item for interruption truncation (P1)
+    const currentOutputItemId = useRef(null);
+    const responseStartTime = useRef(null);
 
     // Keep state and ref in sync together
     const setRip = useCallback((val) => {
@@ -904,6 +908,18 @@ body {
         const id = 'user-' + Date.now();
         streamingUserBubbleId.current = id;
         setMessages((prev) => [...prev, { id, role: 'user', content: '\u2026' }]);
+        // Truncate any in-progress audio response so the conversation history
+        // matches what the user actually heard, not the full undelivered output.
+        if (responseInProgressRef.current && currentOutputItemId.current) {
+          sendDataChannelMessage({
+            type: 'conversation.item.truncate',
+            item_id: currentOutputItemId.current,
+            content_index: 0,
+            audio_end_ms: responseStartTime.current !== null
+              ? Math.max(0, Date.now() - responseStartTime.current)
+              : 0,
+          });
+        }
         return;
       }
 
@@ -998,6 +1014,7 @@ body {
       // never produce an empty orphan bubble.
       if (type === 'response.created') {
         setRip(true);
+        responseStartTime.current = Date.now();
         return;
       }
 
@@ -1011,8 +1028,20 @@ body {
         return;
       }
 
-      // Tool call from the model
+      // Track the current audio output item so speech_started can truncate it (P1)
       if (type === 'response.output_item.added') {
+        const item = event.item;
+        if (item && item.type !== 'function_call') {
+          currentOutputItemId.current = item.id;
+        }
+        return;
+      }
+
+      // Tool call from the model — act on output_item.done, not output_item.added.
+      // output_item.added fires when the item is *created*; arguments stream in
+      // afterward and are only guaranteed complete at output_item.done.
+      // Executing on .added risks calling the tool with empty or truncated arguments.
+      if (type === 'response.output_item.done') {
         const item = event.item;
         if (!item || item.type !== 'function_call') return;
 
@@ -1077,84 +1106,6 @@ body {
     }, [sendDataChannelMessage, sessionId, addUserMessage, startAssistantMessage, setRip, onPauseReplies, onResumeReplies]);
 
     return { messages, responseInProgress, messageRefs, handleDataChannelEvent, clearMessages, loadHistoryMessages };
-  }
-
-  // -------------------------------------------------------------------------
-  // ConnectionHealthManager  (Task 5.5) — pure logic, no UI
-  // -------------------------------------------------------------------------
-
-  class ConnectionHealthManager {
-    /**
-     * @param {{ strategy?: 'manual'|'auto_immediate'|'auto_delayed'|'proactive' }} options
-     */
-    constructor({ strategy = 'manual' } = {}) {
-      this.strategy = strategy;
-      this.reconnectCount = 0;
-      this.disconnectHistory = [];
-      this._sessionStart = null;
-      this._lastEventTime = null;
-      this._lastSpeechTime = null;
-    }
-
-    /** Call when a new session starts (or reconnects). */
-    startSession() {
-      const now = Date.now();
-      this._sessionStart = now;
-      this._lastEventTime = now;
-      this._lastSpeechTime = now;
-    }
-
-    /** Record that a realtime event was received (heartbeat for staleness). */
-    recordEvent() {
-      this._lastEventTime = Date.now();
-    }
-
-    /** Record that the user or assistant produced speech. */
-    recordSpeech() {
-      this._lastSpeechTime = Date.now();
-    }
-
-    /**
-     * Returns a snapshot of current session health.
-     * @returns {{
-     *   sessionAge: number|null,
-     *   timeSinceEvent: number,
-     *   timeSinceSpeech: number,
-     *   warnings: string[],
-     *   reconnectCount: number,
-     * }}
-     */
-    getStatus() {
-      const now = Date.now();
-      const sessionAge =
-        this._sessionStart !== null ? (now - this._sessionStart) / 1000 : null;
-      const timeSinceEvent =
-        this._lastEventTime !== null ? (now - this._lastEventTime) / 1000 : 0;
-      const timeSinceSpeech =
-        this._lastSpeechTime !== null ? (now - this._lastSpeechTime) / 1000 : 0;
-
-      const warnings = [];
-      if (timeSinceEvent > 30) warnings.push('stale');
-      if (timeSinceSpeech > 120) warnings.push('idle');
-      if (sessionAge !== null && sessionAge > 55 * 60) warnings.push('session_limit');
-
-      return { sessionAge, timeSinceEvent, timeSinceSpeech, warnings, reconnectCount: this.reconnectCount };
-    }
-
-    /**
-     * Infer why the session disconnected.
-     * @param {number} sessionAge  Age in seconds at time of disconnect.
-     * @returns {'session_limit'|'idle_timeout'|'network_error'}
-     */
-    inferDisconnectReason(sessionAge) {
-      if (sessionAge >= 58 * 60) return 'session_limit';
-      const timeSinceSpeech =
-        this._lastSpeechTime !== null
-          ? (Date.now() - this._lastSpeechTime) / 1000
-          : Infinity;
-      if (timeSinceSpeech >= 120) return 'idle_timeout';
-      return 'network_error';
-    }
   }
 
   // -------------------------------------------------------------------------
@@ -1291,12 +1242,13 @@ body {
     }, [muted]);
 
     // Pause: prevent the model from auto-responding (disable create_response)
+    // Uses GA API nested path: session.audio.input.turn_detection (not beta flat path)
     const enterPauseReplies = useCallback(() => {
       setPauseReplies(true);
       sendDataChannelMessage({
         type: 'session.update',
         session: {
-          turn_detection: { type: 'semantic_vad', eagerness: 'medium', create_response: false },
+          audio: { input: { turn_detection: { type: 'server_vad', create_response: false } } },
         },
       });
     }, [sendDataChannelMessage]);
@@ -1307,7 +1259,7 @@ body {
       sendDataChannelMessage({
         type: 'session.update',
         session: {
-          turn_detection: { type: 'semantic_vad', eagerness: 'medium', create_response: true },
+          audio: { input: { turn_detection: { type: 'server_vad', create_response: true } } },
         },
       });
     }, [sendDataChannelMessage]);
@@ -1586,13 +1538,18 @@ body {
         .catch(() => { /* silent — keep default 'Amplifier' */ });
     }, []);
 
+    // Ref so onProactiveReconnect (below) can call handleResume (defined after this hook call)
+    const handleResumeRef = useRef(null);
+
     // Task 5.5: poll connection health every 5s
     const healthStatus = useConnectionHealth({
       manager: healthManagerRef.current,
       onProactiveReconnect: useCallback(() => {
         console.debug('[VoiceApp] Proactive reconnect triggered by session_limit warning');
-        // TODO: implement proactive reconnect flow
-      }, []),
+        if (handleResumeRef.current && sessionId) {
+          handleResumeRef.current(sessionId);
+        }
+      }, [sessionId]),
     });
 
     // Task 5.5: sync strategy state → manager whenever it changes
@@ -1793,6 +1750,9 @@ body {
         setIsConnecting(false);
       }
     }, [connect, disconnect, setMicStream, streamRef, loadHistoryMessages]);
+
+    // Keep ref current so proactive reconnect (defined above) can forward to handleResume
+    handleResumeRef.current = handleResume;
 
     // handleConnect: POST /apps/voice/sessions then initiate WebRTC
     const handleConnect = useCallback(async () => {

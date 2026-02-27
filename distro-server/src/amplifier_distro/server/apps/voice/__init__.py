@@ -11,6 +11,7 @@ Architecture:
     Backend (this module):
         GET  /                          - Voice UI static/index.html
         GET  /static/vendor.js          - Bundled vendor JS
+        GET  /static/connection-health.mjs - ConnectionHealthManager class
         GET  /api/status                - Voice service status
         GET  /session        (auth)     - GA ephemeral client_secret token
         POST /sdp                       - WebRTC SDP offer/answer exchange
@@ -75,42 +76,6 @@ _repo_override: Any = None
 # ---------------------------------------------------------------------------
 
 _VALID_SESSION_ID = re.compile(r"^[a-zA-Z0-9_\-]+$")
-
-# ---------------------------------------------------------------------------
-# VOICE_TOOLS
-# ---------------------------------------------------------------------------
-
-VOICE_TOOLS: list[dict[str, Any]] = [
-    {
-        "name": "delegate",
-        "description": "Delegate a task to the Amplifier agent with the given instruction.",  # noqa: E501
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "instruction": {
-                    "type": "string",
-                    "description": "The instruction to pass to Amplifier.",
-                }
-            },
-            "required": ["instruction"],
-        },
-    },
-    {
-        "name": "cancel_current_task",
-        "description": "Cancel the currently running Amplifier task.",
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "pause_replies",
-        "description": "Pause assistant replies until resume_replies is called.",
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "resume_replies",
-        "description": "Resume assistant replies after pause_replies.",
-        "parameters": {"type": "object", "properties": {}},
-    },
-]
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -216,6 +181,22 @@ async def vendor_js():
         )
     return PlainTextResponse(
         content="// vendor.js not built yet - run npm run build",
+        status_code=404,
+    )
+
+
+@router.get("/static/connection-health.mjs", response_model=None)
+async def connection_health_mjs():
+    """Serve connection-health.mjs (ConnectionHealthManager class)."""
+    mjs_path = Path(__file__).parent / "static" / "connection-health.mjs"
+    if mjs_path.exists():
+        from fastapi.responses import Response
+
+        return Response(
+            content=mjs_path.read_bytes(), media_type="application/javascript"
+        )
+    return PlainTextResponse(
+        content="// connection-health.mjs not found",
         status_code=404,
     )
 
@@ -617,12 +598,11 @@ async def execute_tool(
     request: Request,
     x_api_key: str | None = Header(default=None),
 ) -> JSONResponse:
-    """Execute a VOICE_TOOL on behalf of the active voice session.
+    """Execute a voice tool on behalf of the active voice session.
 
     Supported tools:
       - delegate: run instruction via backend.send_message(), returns actual result
       - cancel_current_task: cancel active session
-      - pause_replies / resume_replies: acknowledged (future implementation)
     """
     await _require_api_key(x_api_key)
 
@@ -661,9 +641,6 @@ async def execute_tool(
         await conn.cancel()
         return JSONResponse(content={"result": "cancelled"})
 
-    if name in ("pause_replies", "resume_replies"):
-        return JSONResponse(content={"result": f"{name} acknowledged"})
-
     return JSONResponse(status_code=400, content={"error": f"Unknown tool: {name}"})
 
 
@@ -691,10 +668,14 @@ async def cancel_session(
         return JSONResponse(status_code=400, content={"error": "Invalid JSON body"})
 
     session_id: str = body.get("session_id", "")
-    immediate: bool = body.get("immediate", False)
+    level: str = body.get("level", "graceful")
+    if level not in ("graceful", "immediate"):
+        return JSONResponse(
+            status_code=400,
+            content={"error": "level must be 'graceful' or 'immediate'"},
+        )
 
     backend = _get_backend()
-    level = "immediate" if immediate else "graceful"
     await backend.cancel_session(session_id, level=level)
 
     return JSONResponse(content={"cancelled": True, "session_id": session_id})

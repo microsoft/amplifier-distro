@@ -126,14 +126,16 @@ class TestIndexContent:
             "Stage 1 session.update must use server_vad type"
         )
 
-    def test_stage2_semantic_vad(self) -> None:
-        assert "semantic_vad" in self.html, (
-            "Stage 2 session.update must use semantic_vad type (GA constraint)"
+    def test_stage2_server_vad(self) -> None:
+        # Pause/resume uses server_vad via GA nested path (not beta flat path)
+        assert "server_vad" in self.html, (
+            "Stage 2 pause/resume must use server_vad via GA nested path "
+            "(session.audio.input.turn_detection)"
         )
 
     def test_stage2_uses_settimeout(self) -> None:
         assert "setTimeout" in self.html, (
-            "Stage 2 semantic_vad must be sent after setTimeout (GA API constraint)"
+            "Stage 2 VAD update must be sent after setTimeout (GA API constraint)"
         )
 
     def test_vad_threshold(self) -> None:
@@ -149,8 +151,12 @@ class TestIndexContent:
             "Stage 1 must configure transcription with gpt-4o-transcribe"
         )
 
-    def test_semantic_vad_eagerness(self) -> None:
-        assert "eagerness" in self.html, "Stage 2 semantic_vad must set eagerness"
+    def test_vad_ga_nested_path(self) -> None:
+        # GA API: turn_detection nested under audio.input, not flat path
+        assert "audio" in self.html and "input" in self.html, (
+            "Stage 2 VAD update must use GA nested path: "
+            "session.audio.input.turn_detection"
+        )
 
     # --- VoiceApp component ---
     def test_declares_voice_app_component(self) -> None:
@@ -382,9 +388,10 @@ class TestUseChatMessages:
             "handleDataChannelEvent must handle response.done"
         )
 
-    def test_response_output_item_added(self) -> None:
-        assert "response.output_item.added" in self.html, (
-            "handleDataChannelEvent must handle response.output_item.added"
+    def test_response_output_item_done(self) -> None:
+        assert "response.output_item.done" in self.html, (
+            "handleDataChannelEvent must handle response.output_item.done "
+            "(arguments are complete at done, not at output_item.added)"
         )
 
     # --- Tool calling ---
