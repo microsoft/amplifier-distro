@@ -662,14 +662,17 @@ body {
           },
         ];
 
-        // turn_detection is not accepted by session.update on this endpoint.
-        // The API default (server_vad) handles VAD automatically.
+        // Stage 1: server_vad with threshold and transcription model
         const sessionConfig = {
           type: 'session.update',
           session: {
             type: 'realtime',
+            turn_detection: {
+              type: 'server_vad',
+              threshold: 0.5,
+            },
             input_audio_transcription: {
-              model: 'whisper-1',
+              model: 'gpt-4o-transcribe',
             },
             tools: TOOLS,
           },
@@ -1282,7 +1285,7 @@ body {
       sendDataChannelMessage({
         type: 'session.update',
         session: {
-          turn_detection: { type: 'semantic_vad', create_response: false },
+          turn_detection: { type: 'semantic_vad', eagerness: 'medium', create_response: false },
         },
       });
     }, [sendDataChannelMessage]);
@@ -1293,7 +1296,7 @@ body {
       sendDataChannelMessage({
         type: 'session.update',
         session: {
-          turn_detection: { type: 'semantic_vad', create_response: true },
+          turn_detection: { type: 'semantic_vad', eagerness: 'medium', create_response: true },
         },
       });
     }, [sendDataChannelMessage]);

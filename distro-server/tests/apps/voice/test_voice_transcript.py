@@ -413,7 +413,8 @@ class TestWriteToAmplifierTranscript:
     """Tests for VoiceConversationRepository.write_to_amplifier_transcript().
 
     This method mirrors voice conversation turns into the Amplifier session
-    transcript at ~/.amplifier/projects/{project_id}/sessions/{session_id}/transcript.jsonl
+    transcript at ~/.amplifier/projects/{project_id}/sessions/{session_id}/
+    transcript.jsonl
     so that the chat app can discover and display voice sessions.
     """
 
@@ -456,7 +457,7 @@ class TestWriteToAmplifierTranscript:
     def test_write_to_amplifier_transcript_creates_file(
         self, repo: VoiceConversationRepository, amplifier_home: Path
     ) -> None:
-        """write_to_amplifier_transcript() creates transcript.jsonl with user/assistant lines."""
+        """write_to_amplifier_transcript() creates transcript.jsonl with user/assistant lines."""  # noqa: E501
         entries = [
             self._make_entry(role="user", content="Hello"),
             self._make_entry(role="assistant", content="Hi there!"),
@@ -466,7 +467,9 @@ class TestWriteToAmplifierTranscript:
             "sess-001", "proj-123", entries, amplifier_home=amplifier_home
         )
 
-        transcript_path = self._amplifier_transcript(amplifier_home, "proj-123", "sess-001")
+        transcript_path = self._amplifier_transcript(
+            amplifier_home, "proj-123", "sess-001"
+        )
         assert transcript_path.exists(), "transcript.jsonl must be created"
 
         lines = [ln for ln in transcript_path.read_text().splitlines() if ln.strip()]
@@ -483,7 +486,7 @@ class TestWriteToAmplifierTranscript:
     def test_write_to_amplifier_transcript_skips_tool_entries(
         self, repo: VoiceConversationRepository, amplifier_home: Path
     ) -> None:
-        """tool_call and tool_result entries must NOT appear in the Amplifier transcript."""
+        """tool_call and tool_result entries must NOT appear in the Amplifier transcript."""  # noqa: E501
         entries = [
             self._make_entry(role="user", content="Do something"),
             self._make_entry(role="tool_call", content='{"action": "search"}'),
@@ -495,9 +498,13 @@ class TestWriteToAmplifierTranscript:
             "sess-001", "proj-123", entries, amplifier_home=amplifier_home
         )
 
-        transcript_path = self._amplifier_transcript(amplifier_home, "proj-123", "sess-001")
+        transcript_path = self._amplifier_transcript(
+            amplifier_home, "proj-123", "sess-001"
+        )
         lines = [ln for ln in transcript_path.read_text().splitlines() if ln.strip()]
-        assert len(lines) == 2, f"Expected 2 lines (user + assistant only), got {len(lines)}"
+        assert len(lines) == 2, (
+            f"Expected 2 lines (user + assistant only), got {len(lines)}"
+        )
 
         roles = [json.loads(ln)["role"] for ln in lines]
         assert roles == ["user", "assistant"]
@@ -505,19 +512,25 @@ class TestWriteToAmplifierTranscript:
     def test_write_to_amplifier_transcript_empty_entries_creates_stub(
         self, repo: VoiceConversationRepository, amplifier_home: Path
     ) -> None:
-        """Calling with [] must create directory and empty transcript.jsonl for discoverability."""
+        """Calling with [] must create directory and empty transcript.jsonl for discoverability."""  # noqa: E501
         repo.write_to_amplifier_transcript(
             "sess-001", "proj-123", [], amplifier_home=amplifier_home
         )
 
-        transcript_path = self._amplifier_transcript(amplifier_home, "proj-123", "sess-001")
-        assert transcript_path.exists(), "transcript.jsonl must be created even with no entries"
-        assert transcript_path.read_text() == "", "stub file must be empty when no entries"
+        transcript_path = self._amplifier_transcript(
+            amplifier_home, "proj-123", "sess-001"
+        )
+        assert transcript_path.exists(), (
+            "transcript.jsonl must be created even with no entries"
+        )
+        assert transcript_path.read_text() == "", (
+            "stub file must be empty when no entries"
+        )
 
     def test_write_to_amplifier_transcript_appends(
         self, repo: VoiceConversationRepository, amplifier_home: Path
     ) -> None:
-        """Calling write_to_amplifier_transcript twice appends rather than overwrites."""
+        """Calling write_to_amplifier_transcript twice appends rather than overwrites."""  # noqa: E501
         first_call = [self._make_entry(role="user", content="First message")]
         second_call = [self._make_entry(role="assistant", content="Second message")]
 
@@ -528,7 +541,9 @@ class TestWriteToAmplifierTranscript:
             "sess-001", "proj-123", second_call, amplifier_home=amplifier_home
         )
 
-        transcript_path = self._amplifier_transcript(amplifier_home, "proj-123", "sess-001")
+        transcript_path = self._amplifier_transcript(
+            amplifier_home, "proj-123", "sess-001"
+        )
         lines = [ln for ln in transcript_path.read_text().splitlines() if ln.strip()]
         assert len(lines) == 2, "Second call must append, not overwrite"
         assert json.loads(lines[0])["role"] == "user"

@@ -554,12 +554,20 @@ async def end_session(
     except Exception:  # noqa: BLE001
         body = {}
 
-    reason: str = body.get("reason", "user_ended")
+    _VALID_REASONS = {
+        "session_limit",
+        "network_error",
+        "user_ended",
+        "idle_timeout",
+        "error",
+    }
+    raw_reason: str = body.get("reason", "user_ended")
+    reason = raw_reason if raw_reason in _VALID_REASONS else "error"
     backend = _get_backend()
     repo = _get_repo()
 
     await backend.end_session(session_id)
-    repo.end_conversation(session_id, reason)
+    repo.end_conversation(session_id, reason)  # type: ignore[arg-type]
     _active_connection = None
 
     logger.info("Voice session ended: %s (reason=%s)", session_id, reason)

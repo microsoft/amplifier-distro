@@ -22,7 +22,7 @@ def _make_config() -> VoiceConfig:
 
 
 def test_session_payload_includes_input_audio_transcription(monkeypatch):
-    """create_client_secret must include input_audio_transcription in the session payload.
+    """create_client_secret must include input_audio_transcription in session payload.
 
     RED: fails before the field is added to the payload dict.
     GREEN: passes after adding {"model": "whisper-1"} to the session dict.
@@ -53,7 +53,7 @@ def test_session_payload_includes_input_audio_transcription(monkeypatch):
 
     token = asyncio.run(create_client_secret(_make_config()))
 
-    assert token == "ek_test_token"
+    assert token == "ek_test_token"  # noqa: S105
     session = captured.get("session", {})
     assert "input_audio_transcription" in session, (
         f"input_audio_transcription missing from session payload. Got: {session}"
