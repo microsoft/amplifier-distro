@@ -573,6 +573,7 @@ class TestSessionHandleCancel:
         mock_session.coordinator.request_cancel.assert_called_once_with("graceful")
 
     async def test_cancel_no_session_does_not_raise(self):
+        """cancel() returns early when session is None — must not raise."""
         from amplifier_distro.server.session_backend import _SessionHandle
 
         handle = _SessionHandle(
@@ -584,6 +585,7 @@ class TestSessionHandleCancel:
         await handle.cancel("graceful")  # must not raise
 
     async def test_cancel_no_coordinator_does_not_raise(self):
+        """cancel() returns early when coordinator is absent — must not raise."""
         from amplifier_distro.server.session_backend import _SessionHandle
 
         mock_session = MagicMock(spec=[])  # no coordinator attr
