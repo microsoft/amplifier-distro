@@ -25,6 +25,7 @@ from amplifier_distro.metadata_persistence import (
     register_metadata_hooks,
     write_metadata,
 )
+from amplifier_distro.server.spawn_registration import register_spawning
 from amplifier_distro.transcript_persistence import register_transcript_hooks
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ class _SessionHandle:
     working_dir: Path
     session: Any  # AmplifierSession from foundation
     _cleanup_done: bool = field(default=False, repr=False)
+    prepared: Any = field(default=None, repr=False)
 
     async def run(self, prompt: str) -> str:
         """Execute a prompt and return the response text."""
@@ -428,6 +430,23 @@ class FoundationBackend:
             except Exception as exc:  # noqa: BLE001
                 failed_evts.append((evt, exc))
 
+        # Bridge hook — re-emit orchestrator:complete as prompt:complete.
+        # hooks-session-naming (and any foundation hook) listens to
+        # prompt:complete, but loop-streaming emits orchestrator:complete.
+        # Inject session_id since it's absent from the orchestrator event data.
+        async def on_orchestrator_complete(event: str, data: dict) -> HookResult:
+            await coordinator.hooks.emit(
+                "prompt:complete", {**data, "session_id": session_id}
+            )
+            return HookResult(action="continue", data=data)
+
+        try:
+            hooks.register(
+                "orchestrator:complete", on_orchestrator_complete, priority=50
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to register prompt:complete bridge: %s", exc)
+
         logger.info(
             "Event hook wiring: %d registered, %d failed for session %s",
             registered,
@@ -497,6 +516,7 @@ class FoundationBackend:
             project_id=project_id,
             working_dir=wd,
             session=session,
+            prepared=prepared,
         )
         self._sessions[session_id] = handle
 
@@ -528,6 +548,9 @@ class FoundationBackend:
         # Wire streaming/display/approval when event_queue provided
         if event_queue is not None:
             self._wire_event_queue(session, session_id, event_queue)
+
+        # Register session spawning capability
+        register_spawning(session, prepared, session_id)
 
         # Pre-start the session worker so the first message doesn't pay
         # the task-creation overhead
@@ -701,6 +724,7 @@ class FoundationBackend:
                 project_id=project_id,
                 working_dir=wd,
                 session=session,
+                prepared=prepared,
             )
             self._sessions[session_id] = handle
 
@@ -714,6 +738,9 @@ class FoundationBackend:
             )
             register_transcript_hooks(session, session_dir)
             register_metadata_hooks(session, session_dir)
+
+            # Register session spawning capability on reconnect
+            register_spawning(session, prepared, session_id)
 
             queue: asyncio.Queue = asyncio.Queue()
             self._session_queues[session_id] = queue

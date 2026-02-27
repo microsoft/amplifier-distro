@@ -6,6 +6,8 @@ without a real Amplifier installation.
 """
 
 import asyncio
+import sys
+import unittest.mock
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -843,6 +845,74 @@ class TestSessionBackendProtocol:
 
 
 # ── MockBackend new method stubs ───────────────────────────────────────
+
+
+class TestFoundationBackendSpawnRegistration:
+    """Verify session.spawn capability is registered on create and reconnect."""
+
+    async def test_create_session_registers_spawn_capability(self, bridge_backend):
+        """create_session() must register session.spawn on the coordinator."""
+        mock_session = MagicMock()
+        mock_session.session_id = "sess-spawn-create-001"
+        mock_session.project_id = "test-project"
+        mock_session.coordinator = MagicMock()
+
+        mock_prepared = MagicMock()
+        mock_prepared.create_session = AsyncMock(return_value=mock_session)
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.create_session(
+            bridge_backend,
+            working_dir="/tmp",
+            description="spawn test",
+        )
+
+        mock_session.coordinator.register_capability.assert_any_call(
+            "session.spawn", unittest.mock.ANY
+        )
+        # Cleanup
+        if "sess-spawn-create-001" in bridge_backend._worker_tasks:
+            bridge_backend._worker_tasks["sess-spawn-create-001"].cancel()
+
+    async def test_reconnect_registers_spawn_capability(self, bridge_backend):
+        """_reconnect() must register session.spawn on the coordinator."""
+        mock_session = MagicMock()
+        mock_session.session_id = "sess-spawn-rc-001"
+        mock_session.coordinator = MagicMock()
+
+        # Context needs async-compatible methods for transcript injection
+        mock_context = MagicMock()
+        mock_context.get_messages = AsyncMock(return_value=[])
+        mock_context.set_messages = AsyncMock()
+        mock_session.coordinator.get = MagicMock(return_value=mock_context)
+
+        mock_prepared = MagicMock()
+        mock_prepared.create_session = AsyncMock(return_value=mock_session)
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+        bridge_backend._find_transcript = MagicMock(
+            return_value=[{"role": "user", "content": "hello"}]
+        )
+
+        # Ensure amplifier_foundation.session is mockable even without a real install
+        mock_af_session = MagicMock()
+        mock_af_session.find_orphaned_tool_calls.return_value = []
+
+        with patch.dict(
+            sys.modules,
+            {"amplifier_foundation.session": mock_af_session},
+        ):
+            from amplifier_distro.server.session_backend import FoundationBackend
+
+            await FoundationBackend._reconnect(bridge_backend, "sess-spawn-rc-001")
+
+        mock_session.coordinator.register_capability.assert_any_call(
+            "session.spawn", unittest.mock.ANY
+        )
+        # Cleanup
+        if "sess-spawn-rc-001" in bridge_backend._worker_tasks:
+            bridge_backend._worker_tasks["sess-spawn-rc-001"].cancel()
 
 
 class TestMockBackendNewMethods:
