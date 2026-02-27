@@ -86,7 +86,10 @@ class _SessionHandle:
         request_cancel = getattr(coordinator, "request_cancel", None)
         if request_cancel is not None:
             try:
-                request_cancel(level)
+                if asyncio.iscoroutinefunction(request_cancel):
+                    await request_cancel(level)
+                else:
+                    request_cancel(level)
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Error requesting cancel (level=%s)", level, exc_info=True
@@ -550,7 +553,6 @@ class FoundationBackend:
                 "description": description,
             },
         )
-
 
         # Wire streaming/display/approval when event_queue provided
         if event_queue is not None:
