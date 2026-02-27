@@ -123,10 +123,6 @@ class VoiceConnection:
 
         Critical: _cleanup_hook() is called unconditionally in finally to prevent
         dead hook accumulation across reconnects that could fire against closed queues.
-
-        Note: _hook_unregister is not yet wired because backend.create_session()
-        handles hook registration internally when event_queue is passed and does not
-        return an unregister callable. Tracked in BACKEND-GAPS.md.
         """
         try:
             if self._session_id is not None:
