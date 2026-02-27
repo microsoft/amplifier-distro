@@ -17,8 +17,10 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 # Path to static/index.html (resolved relative to this test file)
+# __file__ lives at distro-server/tests/apps/voice/test_voice_static_index.py
+# Four .parent calls reach distro-server/, then descend into src/
 _STATIC_DIR = (
-    Path(__file__).parent.parent
+    Path(__file__).parent.parent.parent.parent
     / "src"
     / "amplifier_distro"
     / "server"

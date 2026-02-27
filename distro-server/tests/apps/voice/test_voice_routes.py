@@ -56,7 +56,7 @@ class FakeBackend:
       - register_hooks(session_id, hook)  -> unregister callable
       - mark_disconnected(session_id)
       - end_session(session_id)
-      - cancel_session(session_id, immediate=False)
+      - cancel_session(session_id, level="graceful")
       - reconnect(session_id, ...)
     """
 
@@ -81,13 +81,13 @@ class FakeBackend:
         self.calls.append({"method": "end_session", "session_id": session_id})
 
     async def cancel_session(
-        self, session_id: str, immediate: bool = False, **kwargs
+        self, session_id: str, level: str = "graceful", **kwargs
     ) -> None:
         self.calls.append(
             {
                 "method": "cancel_session",
                 "session_id": session_id,
-                "immediate": immediate,
+                "level": level,
             }
         )
 
