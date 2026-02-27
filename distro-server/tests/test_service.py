@@ -10,6 +10,7 @@ Tests cover:
 """
 
 import configparser
+import shutil
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -496,28 +497,26 @@ class TestFindDistroBinary:
         assert result == str(fake_binary.resolve())
 
     def test_falls_back_to_shutil_which(self, tmp_path: Path) -> None:
-        import shutil
-
         from amplifier_distro.service import _find_distro_binary
 
         nonexistent = str(tmp_path / "does-not-exist")
 
-        with patch.object(sys, "argv", [nonexistent]), patch.object(
-            shutil, "which", return_value="/usr/local/bin/amp-distro"
+        with (
+            patch.object(sys, "argv", [nonexistent]),
+            patch.object(shutil, "which", return_value="/usr/local/bin/amp-distro"),
         ):
             result = _find_distro_binary()
 
         assert result == "/usr/local/bin/amp-distro"
 
     def test_returns_none_when_both_fail(self, tmp_path: Path) -> None:
-        import shutil
-
         from amplifier_distro.service import _find_distro_binary
 
         nonexistent = str(tmp_path / "does-not-exist")
 
-        with patch.object(sys, "argv", [nonexistent]), patch.object(
-            shutil, "which", return_value=None
+        with (
+            patch.object(sys, "argv", [nonexistent]),
+            patch.object(shutil, "which", return_value=None),
         ):
             result = _find_distro_binary()
 
@@ -538,12 +537,15 @@ class TestStaleUnitDetection:
         unit_file = tmp_path / f"{conventions.SERVICE_NAME}.service"
         unit_file.write_text("[Service]\nExecStart=/usr/local/bin/amp-distro-server\n")
 
-        with patch(
-            "amplifier_distro.service._systemd_server_unit_path",
-            return_value=unit_file,
-        ), patch(
-            "amplifier_distro.service._run_cmd",
-            return_value=(True, "active"),
+        with (
+            patch(
+                "amplifier_distro.service._systemd_server_unit_path",
+                return_value=unit_file,
+            ),
+            patch(
+                "amplifier_distro.service._run_cmd",
+                return_value=(True, "active"),
+            ),
         ):
             result = _status_systemd()
 
@@ -561,16 +563,19 @@ class TestStaleUnitDetection:
 
         plist_file = tmp_path / f"{conventions.LAUNCHD_LABEL}.plist"
         plist_file.write_text(
-            "<?xml version=\"1.0\"?>"
+            '<?xml version="1.0"?>'
             "<plist><string>/usr/local/bin/amp-distro-server</string></plist>"
         )
 
-        with patch(
-            "amplifier_distro.service._launchd_server_plist_path",
-            return_value=plist_file,
-        ), patch(
-            "amplifier_distro.service._run_cmd",
-            return_value=(True, "active"),
+        with (
+            patch(
+                "amplifier_distro.service._launchd_server_plist_path",
+                return_value=plist_file,
+            ),
+            patch(
+                "amplifier_distro.service._run_cmd",
+                return_value=(True, "active"),
+            ),
         ):
             result = _status_launchd()
 
@@ -589,12 +594,15 @@ class TestStaleUnitDetection:
         unit_file = tmp_path / f"{conventions.SERVICE_NAME}.service"
         unit_file.write_text("[Service]\nExecStart=/usr/local/bin/amp-distro serve\n")
 
-        with patch(
-            "amplifier_distro.service._systemd_server_unit_path",
-            return_value=unit_file,
-        ), patch(
-            "amplifier_distro.service._run_cmd",
-            return_value=(True, "active"),
+        with (
+            patch(
+                "amplifier_distro.service._systemd_server_unit_path",
+                return_value=unit_file,
+            ),
+            patch(
+                "amplifier_distro.service._run_cmd",
+                return_value=(True, "active"),
+            ),
         ):
             result = _status_systemd()
 
