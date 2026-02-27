@@ -23,8 +23,7 @@ class TestWatchdogSubcommand:
         result = runner.invoke(main, ["--help"])
 
         assert result.exit_code == 0
-        assert "watchdog" in main.commands  # command is registered...
-        assert "watchdog" not in result.output  # ...but hidden from help
+        assert "watchdog" not in result.output
 
     def test_watchdog_subcommand_exists(self) -> None:
         """'amp-distro watchdog --help' must succeed with exit code 0."""
