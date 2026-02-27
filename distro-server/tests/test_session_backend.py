@@ -595,6 +595,29 @@ class TestSessionHandleCancel:
         )
         await handle.cancel("graceful")  # must not raise
 
+    async def test_cancel_awaits_coroutine_request_cancel(self):
+        """cancel() must await request_cancel when it is a coroutine function.
+
+        The coordinator's request_cancel is async in production. The old code
+        called request_cancel(level) without await, silently discarding the
+        coroutine. This test uses AsyncMock to prove the coroutine is awaited.
+        """
+        from amplifier_distro.server.session_backend import _SessionHandle
+
+        mock_session = MagicMock()
+        mock_session.coordinator = MagicMock()
+        mock_session.coordinator.request_cancel = AsyncMock()  # async — must be awaited
+
+        handle = _SessionHandle(
+            session_id="s-await-001",
+            project_id="p-await-001",
+            working_dir=Path("/tmp"),
+            session=mock_session,
+        )
+        await handle.cancel("graceful")
+
+        mock_session.coordinator.request_cancel.assert_awaited_once_with("graceful")
+
 
 # ── FoundationBackend.execute ──────────────────────────────────────────
 
