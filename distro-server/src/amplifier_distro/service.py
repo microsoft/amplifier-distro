@@ -300,7 +300,9 @@ def _install_systemd(include_watchdog: bool) -> ServiceResult:
             success=False,
             platform="linux",
             message="amp-distro binary not found.",
-            details=["Install amplifier-distro first: uv tool install amplifier-distro"]
+            details=[
+                "Install amplifier-distro first: uv tool install amplifier-distro"
+            ],
         )
 
     details: list[str] = []
@@ -629,7 +631,9 @@ def _install_launchd(include_watchdog: bool) -> ServiceResult:
             success=False,
             platform="macos",
             message="amp-distro binary not found.",
-            details=["Install amplifier-distro first: uv tool install amplifier-distro"]
+            details=[
+                "Install amplifier-distro first: uv tool install amplifier-distro"
+            ],
         )
 
     details: list[str] = []
