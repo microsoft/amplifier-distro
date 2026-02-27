@@ -227,6 +227,33 @@ files_changed:
         handoff_path.write_text(content, encoding="utf-8")
         logger.info("Handoff written to %s", handoff_path)
 
+    def _find_latest_handoff(self, slug: str) -> str | None:
+        """Return content of the most recent handoff.md for this project, or None.
+
+        Globs <projects_dir>/<slug>/sessions/*/handoff.md, sorts by file mtime
+        (newest first), reads the top result, and returns its content as a string.
+        Returns None if no files exist, or if the newest file is empty.
+        """
+        sessions_dir = Path(self.config.projects_dir) / slug / "sessions"
+        if not sessions_dir.exists():
+            return None
+        candidates = sorted(
+            (p for p in sessions_dir.glob("*/handoff.md") if p.exists()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not candidates:
+            return None
+        try:
+            content = candidates[0].read_text(encoding="utf-8").strip()
+        except OSError:
+            logger.warning("Could not read handoff file: %s", candidates[0])
+            return None
+        if not content:
+            logger.warning("Most recent handoff file is empty: %s", candidates[0])
+            return None
+        return content
+
     def _derive_project_slug(self, working_dir: str) -> str:
         """Derive project slug from working directory."""
         if not working_dir:
