@@ -2649,6 +2649,8 @@
                   isNewSession: badgeNew,
                   parentSessionId,
                   spawnAgent,
+                  name: s.name || null,
+                  description: s.description || null,
                 });
                 sessionKeyById.set(sessionId, historyKey);
                 changed = true;

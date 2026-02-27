@@ -21,10 +21,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from amplifier_distro.conventions import AMPLIFIER_HOME, PROJECTS_DIR
 from amplifier_distro.features import AMPLIFIER_START_URI
-from amplifier_distro.metadata_persistence import (
-    register_metadata_hooks,
-    write_metadata,
-)
+from amplifier_distro.metadata_persistence import register_metadata_hooks
 from amplifier_distro.server.spawn_registration import register_spawning
 from amplifier_distro.transcript_persistence import register_transcript_hooks
 
@@ -530,12 +527,15 @@ class FoundationBackend:
         )
         register_transcript_hooks(session, session_dir)
 
-        # Write initial metadata.json (readers in chat/slack depend on this)
+        # Metadata is written on the first orchestrator:complete (not
+        # eagerly) so we don't create the session dir before the transcript
+        # hook does — that would confuse the frontend revision poll.
         from datetime import UTC, datetime
 
-        write_metadata(
+        register_metadata_hooks(
+            session,
             session_dir,
-            {
+            initial_metadata={
                 "session_id": session_id,
                 "created": datetime.now(tz=UTC).isoformat(),
                 "bundle": bundle_name or self._bundle_name,
@@ -543,7 +543,7 @@ class FoundationBackend:
                 "description": description,
             },
         )
-        register_metadata_hooks(session, session_dir)
+
 
         # Wire streaming/display/approval when event_queue provided
         if event_queue is not None:
