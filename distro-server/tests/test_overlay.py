@@ -57,10 +57,7 @@ class TestFreshOverlayDoesNotInjectSessionNaming:
         """
         overlay.ensure_overlay(_ANTHROPIC)
         data = yaml.safe_load(overlay_path.read_text()) or {}
-        uris = [
-            entry["bundle"] if isinstance(entry, dict) else entry
-            for entry in data.get("includes", [])
-        ]
+        uris = overlay.get_includes(data)
         assert _STALE_URI not in uris, (
             f"Fresh overlay must not include stale session-naming URI: {_STALE_URI!r}"
         )
@@ -69,10 +66,7 @@ class TestFreshOverlayDoesNotInjectSessionNaming:
         """AMPLIFIER_START_URI must still be present in a fresh overlay."""
         overlay.ensure_overlay(_ANTHROPIC)
         data = yaml.safe_load(overlay_path.read_text()) or {}
-        uris = [
-            entry["bundle"] if isinstance(entry, dict) else entry
-            for entry in data.get("includes", [])
-        ]
+        uris = overlay.get_includes(data)
         assert AMPLIFIER_START_URI in uris, (
             f"Fresh overlay must include AMPLIFIER_START_URI: {AMPLIFIER_START_URI!r}"
         )
@@ -81,10 +75,7 @@ class TestFreshOverlayDoesNotInjectSessionNaming:
         """The provider bundle URI must still be present in a fresh overlay."""
         overlay.ensure_overlay(_ANTHROPIC)
         data = yaml.safe_load(overlay_path.read_text()) or {}
-        uris = [
-            entry["bundle"] if isinstance(entry, dict) else entry
-            for entry in data.get("includes", [])
-        ]
+        uris = overlay.get_includes(data)
         expected = provider_bundle_uri(_ANTHROPIC)
         assert expected in uris, (
             f"Fresh overlay must include provider URI: {expected!r}"
