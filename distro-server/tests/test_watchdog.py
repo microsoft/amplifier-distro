@@ -495,22 +495,30 @@ class TestRestartServerSupervisorDetection:
         """Under launchd (LAUNCHD_JOB_NAME set): stops server and exits 1, never daemonizes."""
         from amplifier_distro.server.watchdog import _restart_server
 
-        with patch.dict(
-            os.environ, {"LAUNCHD_JOB_NAME": "com.amplifier.distro"}, clear=True
+        with (
+            patch.dict(
+                os.environ, {"LAUNCHD_JOB_NAME": "com.amplifier.distro"}, clear=True
+            ),
+            pytest.raises(SystemExit) as exc_info,
         ):
-            with pytest.raises(SystemExit) as exc_info:
-                _restart_server("127.0.0.1", 8400, None, False)
+            _restart_server("127.0.0.1", 8400, None, False)
 
         assert exc_info.value.code == 1
         mock_stop.assert_called_once()
         mock_daemonize.assert_not_called()
 
+    @patch(
+        "amplifier_distro.server.watchdog._is_supervised",
+        create=True,
+        return_value=False,
+    )
     @patch("amplifier_distro.server.watchdog.daemonize")
     @patch("amplifier_distro.server.watchdog.is_running", return_value=False)
     def test_restart_standalone_calls_daemonize(
         self,
         _mock_is_running: MagicMock,
         mock_daemonize: MagicMock,
+        mock_is_supervised: MagicMock,
     ) -> None:
         """Standalone (no supervisor env vars): calls daemonize() normally."""
         mock_daemonize.return_value = 12345
@@ -520,6 +528,7 @@ class TestRestartServerSupervisorDetection:
         with patch.dict(os.environ, {}, clear=True):
             _restart_server("127.0.0.1", 8400, None, False)
 
+        mock_is_supervised.assert_called_once()
         mock_daemonize.assert_called_once_with(
             host="127.0.0.1", port=8400, apps_dir=None, dev=False
         )
