@@ -10,6 +10,7 @@ Tests cover:
 """
 
 import configparser
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -60,11 +61,11 @@ class TestSystemdServerUnit:
 
     def _generate(
         self,
-        server_bin: str = "/usr/local/bin/amp-distro-server",
+        distro_bin: str = "/usr/local/bin/amp-distro",
     ) -> str:
         from amplifier_distro.service import _generate_systemd_server_unit
 
-        return _generate_systemd_server_unit(server_bin)
+        return _generate_systemd_server_unit(distro_bin)
 
     def _parse(self, content: str) -> configparser.ConfigParser:
         parser = configparser.ConfigParser()
@@ -78,17 +79,19 @@ class TestSystemdServerUnit:
         assert "Service" in parser
         assert "Install" in parser
 
-    def test_restart_always(self) -> None:
+    def test_restart_on_failure(self) -> None:
         parser = self._parse(self._generate())
-        assert parser["Service"]["Restart"] == "always"
+        assert parser["Service"]["Restart"] == "on-failure"
 
     def test_after_network(self) -> None:
         parser = self._parse(self._generate())
         assert "network.target" in parser["Unit"]["After"]
 
     def test_correct_exec_start(self) -> None:
-        content = self._generate("/my/custom/path/amp-distro-server")
-        assert "/my/custom/path/amp-distro-server" in content
+        content = self._generate("/my/custom/path/amp-distro")
+        assert "/my/custom/path/amp-distro" in content
+        assert "serve" in content
+        assert "amp-distro-server" not in content
 
     def test_has_environment_path(self) -> None:
         content = self._generate()
@@ -109,11 +112,11 @@ class TestSystemdWatchdogUnit:
 
     def _generate(
         self,
-        server_bin: str = "/usr/local/bin/amp-distro-server",
+        distro_bin: str = "/usr/local/bin/amp-distro",
     ) -> str:
         from amplifier_distro.service import _generate_systemd_watchdog_unit
 
-        return _generate_systemd_watchdog_unit(server_bin)
+        return _generate_systemd_watchdog_unit(distro_bin)
 
     def _parse(self, content: str) -> configparser.ConfigParser:
         parser = configparser.ConfigParser()
@@ -137,9 +140,11 @@ class TestSystemdWatchdogUnit:
         assert conventions.SERVICE_NAME in parser["Unit"]["After"]
         assert conventions.SERVICE_NAME in parser["Unit"]["Wants"]
 
-    def test_runs_watchdog_module(self) -> None:
+    def test_runs_watchdog_subcommand(self) -> None:
         content = self._generate()
-        assert "amplifier_distro.server.watchdog" in content
+        assert "watchdog" in content
+        assert "amplifier_distro.server.watchdog" not in content
+        assert "-m" not in content
 
     def test_has_environment_path(self) -> None:
         content = self._generate()
@@ -156,11 +161,11 @@ class TestLaunchdServerPlist:
 
     def _generate(
         self,
-        server_bin: str = "/usr/local/bin/amp-distro-server",
+        distro_bin: str = "/usr/local/bin/amp-distro",
     ) -> str:
         from amplifier_distro.service import _generate_launchd_server_plist
 
-        return _generate_launchd_server_plist(server_bin)
+        return _generate_launchd_server_plist(distro_bin)
 
     def test_valid_xml(self) -> None:
         """Generated plist must parse as valid XML."""
@@ -175,8 +180,10 @@ class TestLaunchdServerPlist:
         assert "RunAtLoad" in content
 
     def test_correct_program(self) -> None:
-        content = self._generate("/my/path/amp-distro-server")
-        assert "/my/path/amp-distro-server" in content
+        content = self._generate("/my/path/amp-distro")
+        assert "/my/path/amp-distro" in content
+        assert "<string>serve</string>" in content
+        assert "amp-distro-server" not in content
 
     def test_keep_alive(self) -> None:
         content = self._generate()
@@ -194,12 +201,12 @@ class TestLaunchdServerPlist:
 class TestLaunchdWatchdogPlist:
     """Verify launchd watchdog plist generation."""
 
-    def _generate(self, python_bin: str = "/usr/bin/python3") -> str:
+    def _generate(self, distro_bin: str = "/usr/local/bin/amp-distro") -> str:
         from amplifier_distro.service import (
             _generate_launchd_watchdog_plist,
         )
 
-        return _generate_launchd_watchdog_plist(python_bin)
+        return _generate_launchd_watchdog_plist(distro_bin)
 
     def test_valid_xml(self) -> None:
         ET.fromstring(self._generate())
@@ -208,18 +215,20 @@ class TestLaunchdWatchdogPlist:
         content = self._generate()
         assert f"{conventions.LAUNCHD_LABEL}.watchdog" in content
 
-    def test_runs_watchdog_module(self) -> None:
+    def test_runs_watchdog_subcommand(self) -> None:
         content = self._generate()
-        assert "amplifier_distro.server.watchdog" in content
+        assert "<string>watchdog</string>" in content
+        assert "amplifier_distro.server.watchdog" not in content
+        assert "<string>-m</string>" not in content
 
     def test_keep_alive_true(self) -> None:
         """Watchdog agent must use KeepAlive=true (always running)."""
         content = self._generate()
         assert "KeepAlive" in content
 
-    def test_correct_python(self) -> None:
-        content = self._generate("/my/venv/bin/python3")
-        assert "/my/venv/bin/python3" in content
+    def test_correct_distro_bin(self) -> None:
+        content = self._generate("/my/custom/amp-distro")
+        assert "/my/custom/amp-distro" in content
 
 
 # ---------------------------------------------------------------------------
@@ -308,8 +317,8 @@ class TestInstallSystemd:
 
     @patch("amplifier_distro.service._run_cmd", return_value=(True, ""))
     @patch(
-        "amplifier_distro.service._find_server_binary",
-        return_value="/usr/local/bin/amp-distro-server",
+        "amplifier_distro.service._find_distro_binary",
+        return_value="/usr/local/bin/amp-distro",
     )
     def test_install_creates_unit_files(
         self,
@@ -332,18 +341,18 @@ class TestInstallSystemd:
         assert server_file.exists()
         assert watchdog_file.exists()
 
-    @patch("amplifier_distro.service._find_server_binary", return_value=None)
+    @patch("amplifier_distro.service._find_distro_binary", return_value=None)
     def test_install_fails_without_binary(self, _mock_bin: MagicMock) -> None:
         from amplifier_distro.service import _install_systemd
 
         result = _install_systemd(include_watchdog=True)
         assert result.success is False
-        assert "not found" in result.message
+        assert "amp-distro" in result.message
 
     @patch("amplifier_distro.service._run_cmd", return_value=(True, ""))
     @patch(
-        "amplifier_distro.service._find_server_binary",
-        return_value="/usr/local/bin/amp-distro-server",
+        "amplifier_distro.service._find_distro_binary",
+        return_value="/usr/local/bin/amp-distro",
     )
     def test_install_without_watchdog(
         self,
@@ -464,3 +473,130 @@ class TestServiceResult:
             details=["step 1", "step 2"],
         )
         assert len(result.details) == 2
+
+
+# ---------------------------------------------------------------------------
+# Find distro binary
+# ---------------------------------------------------------------------------
+
+
+class TestFindDistroBinary:
+    """Verify _find_distro_binary resolution logic."""
+
+    def test_uses_argv0_when_exists(self, tmp_path: Path) -> None:
+        from amplifier_distro.service import _find_distro_binary
+
+        fake_binary = tmp_path / "amp-distro"
+        fake_binary.touch()
+        fake_binary.chmod(0o755)
+
+        with patch.object(sys, "argv", [str(fake_binary)]):
+            result = _find_distro_binary()
+
+        assert result == str(fake_binary.resolve())
+
+    def test_falls_back_to_shutil_which(self, tmp_path: Path) -> None:
+        import shutil
+
+        from amplifier_distro.service import _find_distro_binary
+
+        nonexistent = str(tmp_path / "does-not-exist")
+
+        with patch.object(sys, "argv", [nonexistent]), patch.object(
+            shutil, "which", return_value="/usr/local/bin/amp-distro"
+        ):
+            result = _find_distro_binary()
+
+        assert result == "/usr/local/bin/amp-distro"
+
+    def test_returns_none_when_both_fail(self, tmp_path: Path) -> None:
+        import shutil
+
+        from amplifier_distro.service import _find_distro_binary
+
+        nonexistent = str(tmp_path / "does-not-exist")
+
+        with patch.object(sys, "argv", [nonexistent]), patch.object(
+            shutil, "which", return_value=None
+        ):
+            result = _find_distro_binary()
+
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Stale unit detection
+# ---------------------------------------------------------------------------
+
+
+class TestStaleUnitDetection:
+    """Verify _status_systemd and _status_launchd warn on stale unit files."""
+
+    def test_status_warns_on_stale_systemd_unit(self, tmp_path: Path) -> None:
+        from amplifier_distro.service import _status_systemd
+
+        unit_file = tmp_path / f"{conventions.SERVICE_NAME}.service"
+        unit_file.write_text("[Service]\nExecStart=/usr/local/bin/amp-distro-server\n")
+
+        with patch(
+            "amplifier_distro.service._systemd_server_unit_path",
+            return_value=unit_file,
+        ), patch(
+            "amplifier_distro.service._run_cmd",
+            return_value=(True, "active"),
+        ):
+            result = _status_systemd()
+
+        deprecated_details = [
+            d
+            for d in result.details
+            if "deprecated" in d
+            and "amp-distro-server" in d
+            and "amp-distro service uninstall" in d
+        ]
+        assert len(deprecated_details) >= 1
+
+    def test_status_warns_on_stale_launchd_plist(self, tmp_path: Path) -> None:
+        from amplifier_distro.service import _status_launchd
+
+        plist_file = tmp_path / f"{conventions.LAUNCHD_LABEL}.plist"
+        plist_file.write_text(
+            "<?xml version=\"1.0\"?>"
+            "<plist><string>/usr/local/bin/amp-distro-server</string></plist>"
+        )
+
+        with patch(
+            "amplifier_distro.service._launchd_server_plist_path",
+            return_value=plist_file,
+        ), patch(
+            "amplifier_distro.service._run_cmd",
+            return_value=(True, "active"),
+        ):
+            result = _status_launchd()
+
+        deprecated_details = [
+            d
+            for d in result.details
+            if "deprecated" in d
+            and "amp-distro-server" in d
+            and "amp-distro service uninstall" in d
+        ]
+        assert len(deprecated_details) >= 1
+
+    def test_no_warning_when_unit_is_current(self, tmp_path: Path) -> None:
+        from amplifier_distro.service import _status_systemd
+
+        unit_file = tmp_path / f"{conventions.SERVICE_NAME}.service"
+        unit_file.write_text("[Service]\nExecStart=/usr/local/bin/amp-distro serve\n")
+
+        with patch(
+            "amplifier_distro.service._systemd_server_unit_path",
+            return_value=unit_file,
+        ), patch(
+            "amplifier_distro.service._run_cmd",
+            return_value=(True, "active"),
+        ):
+            result = _status_systemd()
+
+        deprecated_details = [d for d in result.details if "deprecated" in d]
+        assert len(deprecated_details) == 0
