@@ -13,6 +13,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from amplifier_distro.conventions import (
+    AMPLIFIER_HOME,
+    PROJECTS_DIR,
+    TRANSCRIPT_FILENAME,
+)
 from amplifier_distro.server.apps.voice.transcript.models import (
     TranscriptEntry,
     VoiceConversation,
@@ -24,7 +29,7 @@ class VoiceConversationRepository:
 
     Design rules:
     - index.json is ONLY rewritten on create_conversation(), end_conversation(),
-      update_status(). NEVER touched by add_entry().
+      update_status(), and _maybe_set_title() (first-message title enrichment).
     - conversation.json is written atomically via .tmp -> rename
     - transcript.jsonl is append-only, never rewritten
     """
@@ -134,18 +139,63 @@ class VoiceConversationRepository:
                 break
         self._write_index(index)
 
+    def _maybe_set_title(self, session_id: str, text: str) -> None:
+        """Update session title from the first user message if still at default.
+
+        No-op if the conversation is missing or the title has already been
+        customised away from the auto-generated 'Voice session <uuid>' prefix.
+        Updates both conversation.json and index.json atomically.
+        """
+        conv = self.get_conversation(session_id)
+        if conv is None:
+            return
+        # Only update when title is still the auto-generated UUID prefix
+        if not conv.title.startswith("Voice session "):
+            return
+        words = text.strip().split()
+        title = " ".join(words[:6])
+        if len(title) > 40:
+            title = title[:37] + "..."
+        if not title:
+            return
+        conv.title = title
+        conv.updated_at = datetime.now(UTC)
+        self._write_atomic(
+            self.base_dir / session_id / "conversation.json", conv.to_dict()
+        )
+        index = self._read_index()
+        for item in index:
+            if item["id"] == session_id:
+                item["title"] = title
+                break
+        self._write_index(index)
+
     def add_entry(self, session_id: str, entry: TranscriptEntry) -> None:
-        """Append one entry to transcript.jsonl. Does NOT touch index.json."""
+        """Append one entry to transcript.jsonl.
+
+        Special case: the first user entry triggers a title update in
+        conversation.json and index.json via _maybe_set_title().
+        """
         jsonl_path = self.base_dir / session_id / "transcript.jsonl"
         with jsonl_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n")
+        if entry.role == "user":
+            self._maybe_set_title(session_id, entry.content)
 
     def add_entries(self, session_id: str, entries: list[TranscriptEntry]) -> None:
-        """Batch-append entries to transcript.jsonl."""
+        """Batch-append entries to transcript.jsonl.
+
+        Sets the session title from the first user entry in the batch if the
+        title is still at the auto-generated default.
+        """
         jsonl_path = self.base_dir / session_id / "transcript.jsonl"
         with jsonl_path.open("a", encoding="utf-8") as fh:
             for entry in entries:
                 fh.write(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n")
+        for entry in entries:
+            if entry.role == "user":
+                self._maybe_set_title(session_id, entry.content)
+                break
 
     def get_resumption_context(self, session_id: str) -> list[dict[str, Any]]:
         """Read transcript.jsonl and return items in OpenAI Realtime API format.
@@ -208,3 +258,77 @@ class VoiceConversationRepository:
     def list_conversations(self) -> list[dict[str, Any]]:
         """Return all conversations from index.json (fast listing)."""
         return self._read_index()
+
+    def write_to_amplifier_transcript(
+        self,
+        session_id: str,
+        project_id: str,
+        entries: list[TranscriptEntry],
+        *,
+        amplifier_home: Path | None = None,
+    ) -> None:
+        """Write voice turns to the Amplifier session transcript for cross-app
+        visibility.
+
+        Converts voice TranscriptEntry format to Amplifier provider-API format
+        (role + content array). Only user/assistant turns are written — tool_call
+        and tool_result entries are managed by register_transcript_hooks.
+
+        The Amplifier path (~/.amplifier/projects/{project_id}/sessions/{session_id}/)
+        is what scan_sessions() searches. Writing here makes voice sessions appear
+        in the chat app's session history.
+
+        Pass amplifier_home to override the default (~/.amplifier) for testing.
+        """
+        home = amplifier_home or Path(AMPLIFIER_HOME).expanduser()
+        amplifier_dir = home / PROJECTS_DIR / project_id / "sessions" / session_id
+        amplifier_dir.mkdir(parents=True, exist_ok=True)
+        transcript_path = amplifier_dir / TRANSCRIPT_FILENAME
+
+        # Always touch the file — ensures discoverability even before any turns arrive
+        transcript_path.touch(exist_ok=True)
+
+        lines_to_write = []
+        for entry in entries:
+            if entry.role not in ("user", "assistant"):
+                continue
+            msg = {
+                "role": entry.role,
+                "content": [{"type": "text", "text": entry.content}],
+            }
+            lines_to_write.append(json.dumps(msg, ensure_ascii=False))
+
+        if lines_to_write:
+            with transcript_path.open("a", encoding="utf-8") as f:
+                for line in lines_to_write:
+                    f.write(line + "\n")
+
+    def write_amplifier_metadata(
+        self,
+        session_id: str,
+        project_id: str,
+        conv: VoiceConversation,
+        *,
+        amplifier_home: Path | None = None,
+    ) -> None:
+        """Write metadata.json to the Amplifier session directory.
+
+        The Amplifier chat CLI reads this file for session list display —
+        specifically the 'name' and 'bundle' fields. Without it the session
+        appears with '?' for all fields even though it is discoverable.
+
+        Called once at session creation. The name field reflects the initial
+        title ('Voice session <uuid>') and is not updated later.
+        """
+        home = amplifier_home or Path(AMPLIFIER_HOME).expanduser()
+        amplifier_dir = home / PROJECTS_DIR / project_id / "sessions" / session_id
+        amplifier_dir.mkdir(parents=True, exist_ok=True)
+        metadata: dict[str, str | int] = {
+            "session_id": session_id,
+            "bundle": "voice",
+            "name": conv.title,
+            "created": conv.created_at.isoformat(),
+            "model": "voice",
+            "turn_count": 0,
+        }
+        self._write_atomic(amplifier_dir / "metadata.json", metadata)
