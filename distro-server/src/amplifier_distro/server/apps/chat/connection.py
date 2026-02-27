@@ -350,8 +350,64 @@ class ChatConnection:
                 self._session_id = info.session_id
                 self._translator.reset()
                 return {"cwd": new_cwd, "session_id": info.session_id}
+            case "config":
+                return self._build_config_summary()
             case _:
                 return {"error": f"Unknown command: {name}"}
+
+    def _build_config_summary(self) -> dict[str, Any]:
+        """Build a structured config summary for the /config command."""
+        if not self._session_id:
+            return {"error": "No active session"}
+
+        config = self._backend.get_session_config(self._session_id)
+        if config is None:
+            return {"error": "Session config unavailable"}
+
+        session = config.get("session", {})
+        providers = config.get("providers", [])
+        tools = config.get("tools", [])
+        hooks = config.get("hooks", [])
+        agents = config.get("agents", {})
+
+        # Extract provider summaries
+        provider_list = []
+        for p in providers:
+            entry: dict[str, Any] = {"module": p.get("module", "unknown")}
+            pc = p.get("config", {})
+            if pc.get("model"):
+                entry["model"] = pc["model"]
+            if pc.get("priority") is not None:
+                entry["priority"] = pc["priority"]
+            provider_list.append(entry)
+
+        # Extract tool names
+        tool_names = [t.get("module", "unknown") for t in tools]
+
+        # Extract hook names
+        hook_names = [h.get("module", "unknown") for h in hooks]
+
+        # Extract agent names (filter structural keys)
+        agent_names = sorted(
+            k for k in agents if k not in ("dirs", "include", "inline")
+        ) if isinstance(agents, dict) else []
+
+        # Orchestrator / context
+        orch = session.get("orchestrator", "unknown")
+        if isinstance(orch, dict):
+            orch = orch.get("module", "unknown")
+        ctx = session.get("context", "unknown")
+        if isinstance(ctx, dict):
+            ctx = ctx.get("module", "unknown")
+
+        return {
+            "type": "config",
+            "session": {"orchestrator": orch, "context": ctx},
+            "providers": provider_list,
+            "tools": tool_names,
+            "hooks": hook_names,
+            "agents": agent_names,
+        }
 
     async def _event_fanout_loop(self) -> None:
         """Drain event_queue and forward translated events to WebSocket.

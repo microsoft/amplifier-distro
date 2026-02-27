@@ -680,6 +680,26 @@
       font-size: 12px;
       text-align: center;
     }
+    .system-message.config-result {
+      text-align: left;
+      font-size: 13px;
+      max-width: 100%;
+    }
+    .config-result pre {
+      margin: 0;
+      font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre;
+    }
+    .config-result .config-heading {
+      color: var(--text-primary);
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .config-result .config-dim {
+      opacity: 0.6;
+    }
 
     /* —— Thinking Blocks ———————————————————————————————————————— */
     .thinking-block {
@@ -987,9 +1007,61 @@
     { name: '/bundle',  desc: 'Change bundle',           clientSide: false },
     { name: '/modes',   desc: 'List modes',              clientSide: false },
     { name: '/mode',    desc: 'Set mode',                clientSide: false },
+    { name: '/config',  desc: 'Show session config',     clientSide: false },
   ];
 
   // —— Utilities ——————————————————————————————————————————————————————
+
+  function formatCommandResult(command, result) {
+    if (result.error) return { text: result.error };
+
+    if (command === 'config' && result.type === 'config') {
+      const h = s => '<span class="config-heading">' + s + '</span>';
+      const d = s => '<span class="config-dim">' + s + '</span>';
+      const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+      const lines = [];
+      const sess = result.session || {};
+      lines.push(h('Session'));
+      lines.push('  orchestrator  ' + esc(sess.orchestrator || 'unknown'));
+      lines.push('  context       ' + esc(sess.context || 'unknown'));
+
+      if (result.providers && result.providers.length) {
+        lines.push('');
+        lines.push(h('Providers'));
+        for (const p of result.providers) {
+          let line = '  ' + esc(p.module);
+          if (p.model) line += '  ' + d(esc(p.model));
+          if (p.priority != null) line += '  ' + d('priority=' + p.priority);
+          lines.push(line);
+        }
+      }
+
+      if (result.tools && result.tools.length) {
+        lines.push('');
+        lines.push(h('Tools') + ' ' + d('(' + result.tools.length + ')'));
+        for (const t of result.tools) lines.push('  ' + esc(t));
+      }
+
+      if (result.hooks && result.hooks.length) {
+        lines.push('');
+        lines.push(h('Hooks'));
+        for (const hk of result.hooks) lines.push('  ' + esc(hk));
+      }
+
+      if (result.agents && result.agents.length) {
+        lines.push('');
+        lines.push(h('Agents') + ' ' + d('(' + result.agents.length + ')'));
+        for (const a of result.agents) lines.push('  ' + esc(a));
+      }
+
+      return { html: '<pre>' + lines.join('\n') + '</pre>', cssClass: 'config-result' };
+    }
+
+    // Default: pretty-print JSON for other commands
+    return { text: JSON.stringify(result, null, 2) };
+  }
+
   function makeId() {
     return Math.random().toString(36).slice(2, 10);
   }
@@ -1429,7 +1501,8 @@
     if (item.type === 'text') {
       const cls = 'text-block'
         + (item.role === 'user' ? ' user-message' : '')
-        + (item.role === 'system' ? ' system-message' : '');
+        + (item.role === 'system' ? ' system-message' : '')
+        + (item.cssClass ? ' ' + item.cssClass : '');
       if (item.htmlContent) {
         return html`<div class=${cls} id=${item.id}
           dangerouslySetInnerHTML=${{ __html: item.htmlContent }}></div>`;
@@ -2459,13 +2532,21 @@
           }]);
           break;
 
-        case 'command_result':
-          setChronoItems(prev => [...prev, {
+        case 'command_result': {
+          const fmt = formatCommandResult(msg.command, msg.result);
+          const item = {
             id: makeId(), type: 'text', role: 'system',
-            content: JSON.stringify(msg.result, null, 2),
             streaming: false, order: orderCounterRef.current++,
-          }]);
+          };
+          if (fmt.html) {
+            item.htmlContent = fmt.html;
+            item.cssClass = fmt.cssClass || '';
+          } else {
+            item.content = fmt.text;
+          }
+          setChronoItems(prev => [...prev, item]);
           break;
+        }
 
         case 'cancel_acknowledged':
           // Server received the cancel request; awaiting full stop
