@@ -1,9 +1,9 @@
-"""RED tests: fresh overlay must NOT contain SESSION_NAMING_URI.
+"""Regression tests: fresh overlay must NOT contain the stale SESSION_NAMING_URI.
 
-These tests verify that the session-naming hook is NOT automatically injected
-into a freshly created overlay.  Test 1 will FAIL against the current
-implementation (which does inject it) and PASS once the fix is applied.
-Tests 2 and 3 verify that the essential includes are still present.
+These tests verify that the session-naming hook is not injected into a freshly
+created overlay after the fix in overlay.py.  hooks-session-naming is a Python
+module package, not a bundle; injecting it via overlay includes caused
+'Not a valid bundle' errors on every session.
 """
 
 from __future__ import annotations
@@ -50,11 +50,7 @@ class TestFreshOverlayDoesNotInjectSessionNaming:
     """A freshly created overlay must not include the session-naming hook."""
 
     def test_session_naming_uri_absent_from_fresh_overlay(self, overlay_path):
-        """Session-naming URI must NOT appear in a fresh overlay.
-
-        This test is RED: it will fail until ``ensure_overlay`` is fixed to
-        stop injecting SESSION_NAMING_URI.
-        """
+        """Session-naming URI must NOT appear in a fresh overlay."""
         overlay.ensure_overlay(_ANTHROPIC)
         data = yaml.safe_load(overlay_path.read_text()) or {}
         uris = overlay.get_includes(data)

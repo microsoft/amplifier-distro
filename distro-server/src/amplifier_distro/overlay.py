@@ -105,7 +105,7 @@ def ensure_overlay(provider: Provider) -> Path:
             != _STALE_SESSION_NAMING_URI
         ]
         current_uris = set(get_includes(data))
-        includes = data.setdefault("includes", [])
+        includes = data["includes"]
 
         if AMPLIFIER_START_URI not in current_uris:
             includes.insert(0, {"bundle": AMPLIFIER_START_URI})
