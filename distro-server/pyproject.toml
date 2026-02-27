@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amplifier-distro"
-version = "0.2.0"
+version = "0.3.0"
 description = "Amplifier Experience Server - web chat, Slack, voice, and more"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,8 +34,7 @@ all = [
 ]
 
 [project.scripts]
-amp-distro        = "amplifier_distro.cli:main"
-amp-distro-server = "amplifier_distro.server.cli:serve"
+amp-distro = "amplifier_distro.cli:main"
 
 # -- Packaging Boundary ----------------------------------------
 # Only src/ is packaged. Everything else in the repo (planning/,
