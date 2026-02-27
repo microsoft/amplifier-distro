@@ -24,6 +24,7 @@ class TestWatchdogSubcommand:
 
         assert result.exit_code == 0
         assert "watchdog" not in result.output
+        assert "watchdog" in main.commands
 
     def test_watchdog_subcommand_exists(self) -> None:
         """'amp-distro watchdog --help' must succeed with exit code 0."""
@@ -38,11 +39,13 @@ class TestWatchdogSubcommand:
     def test_watchdog_delegates_to_run_watchdog_loop(
         self, mock_loop: MagicMock
     ) -> None:
-        """'amp-distro watchdog --host X --port Y' calls run_watchdog_loop(host=X, port=Y)."""
+        """'amp-distro watchdog --host X --port Y' calls run_watchdog_loop(host=X, port=Y)."""  # noqa: E501
         from amplifier_distro.cli import main
 
         runner = CliRunner()
-        result = runner.invoke(main, ["watchdog", "--host", "0.0.0.0", "--port", "9000"])
+        result = runner.invoke(
+            main, ["watchdog", "--host", "0.0.0.0", "--port", "9000"]
+        )  # noqa: E501
 
         assert result.exit_code == 0
         mock_loop.assert_called_once_with(host="0.0.0.0", port=9000)
