@@ -34,7 +34,8 @@ all = [
 ]
 
 [project.scripts]
-amp-distro = "amplifier_distro.cli:main"
+amp-distro        = "amplifier_distro.cli:main"
+amp-distro-server = "amplifier_distro.server.cli:serve"
 
 # -- Packaging Boundary ----------------------------------------
 # Only src/ is packaged. Everything else in the repo (planning/,
