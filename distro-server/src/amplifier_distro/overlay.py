@@ -15,6 +15,7 @@ include resolution and composition automatically.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,8 @@ import yaml
 
 from .conventions import DISTRO_OVERLAY_DIR
 from .features import AMPLIFIER_START_URI, Provider, provider_bundle_uri
+
+logger = logging.getLogger(__name__)
 
 # Kept here ONLY for migration — it is never added to new overlays.
 _STALE_SESSION_NAMING_URI = (
@@ -53,6 +56,9 @@ def read_overlay() -> dict[str, Any]:
     try:
         return yaml.safe_load(path.read_text()) or {}
     except (yaml.YAMLError, OSError):
+        logger.warning(
+            "Overlay bundle at %s is corrupt or unreadable; treating as absent", path
+        )
         return {}
 
 
@@ -106,7 +112,9 @@ def ensure_overlay(provider: Provider) -> Path:
             ],
         }
     else:
-        # Existing overlay — strip stale session-naming entries, then ensure includes
+        # Strip stale entries first so current_uris is clean before checking
+        # what's already present (otherwise the stale URI would appear in
+        # current_uris and block re-insertion of legitimate URIs).
         data["includes"] = _filter_includes(
             data.get("includes", []), _STALE_SESSION_NAMING_URI
         )
