@@ -81,3 +81,91 @@ class TestFindLatestHandoff:
         write_handoff(sessions_dir, "abc123", content)
         hook = make_hook(str(tmp_path))
         assert hook._find_latest_handoff("my-project") == content.strip()
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — on_session_start injection
+# ---------------------------------------------------------------------------
+
+
+class TestOnSessionStartInjection:
+    async def test_injects_handoff_when_file_exists(self, tmp_path):
+        """When a handoff exists, on_session_start returns inject_context."""
+        sessions_dir = tmp_path / "my-project" / "sessions"
+        write_handoff(sessions_dir, "prev-session", "# Handoff\n\nDid stuff.")
+        hook = make_hook(str(tmp_path))
+
+        result = await hook.on_session_start(
+            "session:start",
+            {
+                "session_id": "new-session-id",
+                "working_directory": str(tmp_path / "my-project"),
+            },
+        )
+
+        assert result.action == "inject_context"
+        assert result.context_injection == "# Handoff\n\nDid stuff."
+        assert result.context_injection_role == "system"
+
+    async def test_continues_when_no_handoff_exists(self, tmp_path):
+        """When no handoff exists, on_session_start returns continue."""
+        hook = make_hook(str(tmp_path))
+
+        result = await hook.on_session_start(
+            "session:start",
+            {
+                "session_id": "new-session-id",
+                "working_directory": str(tmp_path / "my-project"),
+            },
+        )
+
+        assert result.action == "continue"
+
+    async def test_skips_injection_for_sub_sessions(self, tmp_path):
+        """When parent_id is present, skip injection and return continue."""
+        sessions_dir = tmp_path / "my-project" / "sessions"
+        write_handoff(sessions_dir, "prev-session", "# Handoff\n\nShould not inject.")
+        hook = make_hook(str(tmp_path))
+
+        result = await hook.on_session_start(
+            "session:start",
+            {
+                "session_id": "sub-session-id",
+                "working_directory": str(tmp_path / "my-project"),
+                "parent_id": "parent-session-id",
+            },
+        )
+
+        assert result.action == "continue"
+
+    async def test_skips_injection_when_disabled(self, tmp_path):
+        """When config.enabled is False, skip injection and return continue."""
+        sessions_dir = tmp_path / "my-project" / "sessions"
+        write_handoff(sessions_dir, "prev-session", "# Handoff\n\nShould not inject.")
+        hook = make_hook(str(tmp_path), enabled=False)
+
+        result = await hook.on_session_start(
+            "session:start",
+            {
+                "session_id": "new-session-id",
+                "working_directory": str(tmp_path / "my-project"),
+            },
+        )
+
+        assert result.action == "continue"
+
+    async def test_skips_injection_when_handoff_file_is_empty(self, tmp_path):
+        """When the newest handoff.md is empty, return continue (no injection)."""
+        sessions_dir = tmp_path / "my-project" / "sessions"
+        write_handoff(sessions_dir, "prev-session", "")
+        hook = make_hook(str(tmp_path))
+
+        result = await hook.on_session_start(
+            "session:start",
+            {
+                "session_id": "new-session-id",
+                "working_directory": str(tmp_path / "my-project"),
+            },
+        )
+
+        assert result.action == "continue"

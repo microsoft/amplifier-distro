@@ -72,12 +72,31 @@ class HandoffHook:
         self._coordinator: Any = None
 
     async def on_session_start(self, event: str, data: dict[str, Any]) -> HookResult:
-        """Track session metadata on start."""
+        """Track session metadata on start and inject the most recent handoff."""
         self.state.session_id = data.get("session_id", "")
         self.state.working_directory = data.get("working_directory", "")
         self.state.project_slug = self._derive_project_slug(
             self.state.working_directory
         )
+
+        if not self.config.enabled:
+            return HookResult(action="continue")
+
+        if data.get("parent_id"):
+            # Sub-sessions skip injection — they inherit context from the parent.
+            return HookResult(action="continue")
+
+        content = self._find_latest_handoff(self.state.project_slug)
+        if content:
+            logger.debug(
+                "Injecting prior handoff for project %r", self.state.project_slug
+            )
+            return HookResult(
+                action="inject_context",
+                context_injection=content,
+                context_injection_role="system",
+            )
+
         return HookResult(action="continue")
 
     async def on_prompt_complete(self, event: str, data: dict[str, Any]) -> HookResult:
