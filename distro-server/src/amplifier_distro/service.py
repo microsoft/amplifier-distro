@@ -13,6 +13,7 @@ All paths are constructed from conventions.py constants.
 
 from __future__ import annotations
 
+import getpass
 import os
 import platform
 import shutil
@@ -279,7 +280,7 @@ def _install_systemd(include_watchdog: bool) -> ServiceResult:
     """Install systemd user services.
 
     Steps:
-    1. Find amp-distro-server binary via shutil.which.
+    1. Find amp-distro binary via _find_distro_binary().
     2. Create ~/.config/systemd/user/ directory.
     3. Generate and write server unit file.
     4. If include_watchdog: generate and write watchdog unit file.
@@ -359,7 +360,8 @@ def _install_systemd(include_watchdog: bool) -> ServiceResult:
             )
 
     # Enable linger for WSL2 (user services start at boot without login)
-    ok, output = _run_cmd(["loginctl", "enable-linger", os.environ.get("USER", "")])
+    user = os.environ.get("USER") or getpass.getuser()
+    ok, output = _run_cmd(["loginctl", "enable-linger", user])
     if ok:
         details.append("Enabled linger (services start at boot)")
     else:
@@ -565,7 +567,9 @@ def _generate_launchd_watchdog_plist(distro_bin: str) -> str:
     srv_dir = str(
         Path(conventions.AMPLIFIER_HOME).expanduser() / conventions.SERVER_DIR
     )
-    path_env = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+    # Use a standard system PATH; avoids embedding the caller's full PATH
+    # (which may contain dev-specific entries) into the launchd agent.
+    path_env = "/usr/local/bin:/usr/bin:/bin"
     return dedent(f"""\
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
