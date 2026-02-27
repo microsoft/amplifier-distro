@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -705,6 +706,13 @@ class FoundationBackend:
 
             # 3. Create a fresh session with the same bundle
             wd = Path(working_dir).expanduser()
+            # CWD safety guard: BundleRegistry.__init__ calls os.getcwd() which
+            # raises FileNotFoundError if the process CWD was deleted (e.g. in
+            # container or temp-dir environments). Silently recover by moving to ~.
+            try:
+                os.getcwd()
+            except FileNotFoundError:
+                os.chdir(os.path.expanduser("~"))
             prepared = await self._load_bundle()
             session = await prepared.create_session(
                 session_id=session_id,
