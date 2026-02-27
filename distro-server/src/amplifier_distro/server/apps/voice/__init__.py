@@ -612,7 +612,7 @@ async def execute_tool(
     """Execute a VOICE_TOOL on behalf of the active voice session.
 
     Supported tools:
-      - delegate: run instruction via backend.execute()
+      - delegate: run instruction via backend.send_message(), returns actual result
       - cancel_current_task: cancel active session
       - pause_replies / resume_replies: acknowledged (future implementation)
     """
@@ -642,8 +642,8 @@ async def execute_tool(
                 status_code=400, content={"error": "No active voice session"}
             )
         backend = _get_backend()
-        await backend.execute(conn.session_id, instruction)
-        return JSONResponse(content={"result": "delegated"})
+        result = await backend.send_message(conn.session_id, instruction)
+        return JSONResponse(content={"result": result})
 
     if name == "cancel_current_task":
         if conn is None:
