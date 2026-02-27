@@ -64,6 +64,15 @@ def _write_overlay(data: dict[str, Any]) -> Path:
     return path
 
 
+def _filter_includes(includes: list[Any], uri: str) -> list[Any]:
+    """Return *includes* with every entry matching *uri* removed."""
+    return [
+        entry
+        for entry in includes
+        if (entry.get("bundle") if isinstance(entry, dict) else entry) != uri
+    ]
+
+
 def get_includes(data: dict[str, Any] | None = None) -> list[str]:
     """Extract the list of include URIs from overlay data."""
     if data is None:
@@ -98,12 +107,9 @@ def ensure_overlay(provider: Provider) -> Path:
         }
     else:
         # Existing overlay — strip stale session-naming entries, then ensure includes
-        data["includes"] = [
-            entry
-            for entry in data.get("includes", [])
-            if (entry.get("bundle") if isinstance(entry, dict) else entry)
-            != _STALE_SESSION_NAMING_URI
-        ]
+        data["includes"] = _filter_includes(
+            data.get("includes", []), _STALE_SESSION_NAMING_URI
+        )
         current_uris = set(get_includes(data))
         includes = data["includes"]
 
@@ -136,9 +142,5 @@ def remove_include(uri: str) -> None:
     if not data:
         return
 
-    data["includes"] = [
-        entry
-        for entry in data.get("includes", [])
-        if (entry.get("bundle") if isinstance(entry, dict) else entry) != uri
-    ]
+    data["includes"] = _filter_includes(data.get("includes", []), uri)
     _write_overlay(data)
