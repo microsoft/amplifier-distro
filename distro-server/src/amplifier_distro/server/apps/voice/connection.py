@@ -77,11 +77,15 @@ class VoiceConnection:
         hook = EventStreamingHook(event_queue=self._event_queue)
         self._hook = hook
 
-        # 2. Create session via backend — event_queue wires the hook internally
+        # 2. Create session via backend — event_queue wires the hook internally.
+        # exclude_tools=["delegate"] enforces the pure-orchestrator model: the
+        # voice model decides what to delegate; sub-agents must not re-delegate
+        # back through the voice bridge (would create recursive loops).
         session = await self._backend.create_session(
             description="voice",
             working_dir=workspace_root,
             event_queue=self._event_queue,
+            exclude_tools=["delegate"],
         )
 
         # 3. Store session references
@@ -104,6 +108,14 @@ class VoiceConnection:
                 )
 
         assert self._session_id is not None  # set above from session.session_id
+
+        # Fetch and store the hook unregister callable so _cleanup_hook() can
+        # remove the registered hooks on disconnect. Without this, hooks from
+        # the previous connection remain and fire against the stale queue.
+        get_unregister = getattr(self._backend, "get_hook_unregister", None)
+        if get_unregister is not None:
+            self._hook_unregister = get_unregister(self._session_id)
+
         return self._session_id
 
     async def teardown(self) -> None:
@@ -136,12 +148,10 @@ class VoiceConnection:
         finally:
             self._cleanup_hook()
 
-    async def cancel(self, immediate: bool = False) -> None:
+    async def cancel(self, level: str = "graceful") -> None:
         """Cancel the running session."""
         if self._session_id is not None:
-            await self._backend.cancel_session(
-                self._session_id, level="immediate" if immediate else "graceful"
-            )
+            await self._backend.cancel_session(self._session_id, level=level)
 
     def _cleanup_hook(self) -> None:
         """Unregister the hook if one is registered. Always safe to call."""

@@ -668,10 +668,14 @@ async def cancel_session(
         return JSONResponse(status_code=400, content={"error": "Invalid JSON body"})
 
     session_id: str = body.get("session_id", "")
-    immediate: bool = body.get("immediate", False)
+    level: str = body.get("level", "graceful")
+    if level not in ("graceful", "immediate"):
+        return JSONResponse(
+            status_code=400,
+            content={"error": "level must be 'graceful' or 'immediate'"},
+        )
 
     backend = _get_backend()
-    level = "immediate" if immediate else "graceful"
     await backend.cancel_session(session_id, level=level)
 
     return JSONResponse(content={"cancelled": True, "session_id": session_id})
