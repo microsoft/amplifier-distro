@@ -813,6 +813,9 @@ body {
     const streamingAccumulator = useRef('');
     // Shadow ref so async callbacks always see the current responseInProgress value
     const responseInProgressRef = useRef(false);
+    // Tracks the ID of the in-progress user bubble (created on speech_started,
+    // filled on transcription.completed).
+    const streamingUserBubbleId = useRef(null);
 
     // Keep state and ref in sync together
     const setRip = useCallback((val) => {
@@ -842,6 +845,7 @@ body {
       currentStreamingId.current = null;
       streamingAccumulator.current = '';
       messageRefs.current = {};
+      streamingUserBubbleId.current = null;
     }, [setRip]);
 
     // loadHistoryMessages(contextItems): populate messages from resume context.
@@ -889,13 +893,29 @@ body {
         return;
       }
 
-      // VAD speech detection — no UI change needed
-      if (type === 'input_audio_buffer.speech_started') return;
+      // User started speaking — create an empty streaming bubble immediately.
+      // The bubble will be filled with the transcript when transcription.completed fires.
+      if (type === 'input_audio_buffer.speech_started') {
+        const id = 'user-' + Date.now();
+        streamingUserBubbleId.current = id;
+        setMessages((prev) => [...prev, { id, role: 'user', content: '\u2026' }]);
+        return;
+      }
 
-      // User finished speaking — show transcription, wake-word check, trigger reply if idle
+      // User finished speaking — fill the streaming bubble with transcript text.
       if (type === 'conversation.item.input_audio_transcription.completed') {
         const transcript = event.transcript || '';
-        addUserMessage(transcript, event.item_id);
+        const bubbleId = streamingUserBubbleId.current;
+        if (bubbleId) {
+          // Fill the existing streaming bubble created on speech_started.
+          setMessages((prev) =>
+            prev.map((m) => (m.id === bubbleId ? { ...m, content: transcript } : m))
+          );
+          streamingUserBubbleId.current = null;
+        } else {
+          // Fallback: no streaming bubble exists (e.g. speech_started was missed).
+          addUserMessage(transcript, event.item_id);
+        }
         // Task 5.4: run wake-word detection before auto-respond decision
         if (checkTranscript) checkTranscript(transcript);
         if (!responseInProgressRef.current) {
