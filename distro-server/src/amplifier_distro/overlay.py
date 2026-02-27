@@ -23,7 +23,8 @@ import yaml
 from .conventions import DISTRO_OVERLAY_DIR
 from .features import AMPLIFIER_START_URI, Provider, provider_bundle_uri
 
-SESSION_NAMING_URI = (
+# Kept here ONLY for migration — it is never added to new overlays.
+_STALE_SESSION_NAMING_URI = (
     "git+https://github.com/microsoft/amplifier-foundation@main"
     "#subdirectory=modules/hooks-session-naming"
 )
@@ -74,7 +75,7 @@ def get_includes(data: dict[str, Any] | None = None) -> list[str]:
 
 
 def ensure_overlay(provider: Provider) -> Path:
-    """Create (or update) the overlay bundle with include to maintained bundle + a provider.
+    """Create (or update) the overlay bundle with the distro bundle + a provider.
 
     If the overlay already exists, the provider include is added only if
     not already present.  The distro bundle include is always ensured.
@@ -93,11 +94,16 @@ def ensure_overlay(provider: Provider) -> Path:
             "includes": [
                 {"bundle": AMPLIFIER_START_URI},
                 {"bundle": provider_bundle_uri(provider)},
-                {"bundle": SESSION_NAMING_URI},
             ],
         }
     else:
-        # Existing overlay — ensure includes are present
+        # Existing overlay — strip stale session-naming entries, then ensure includes
+        data["includes"] = [
+            entry
+            for entry in data.get("includes", [])
+            if (entry.get("bundle") if isinstance(entry, dict) else entry)
+            != _STALE_SESSION_NAMING_URI
+        ]
         current_uris = set(get_includes(data))
         includes = data.setdefault("includes", [])
 
@@ -107,9 +113,6 @@ def ensure_overlay(provider: Provider) -> Path:
         prov_uri = provider_bundle_uri(provider)
         if prov_uri not in current_uris:
             includes.append({"bundle": prov_uri})
-
-        if SESSION_NAMING_URI not in current_uris:
-            includes.append({"bundle": SESSION_NAMING_URI})
 
     _write_overlay(data)
     return overlay_dir()
