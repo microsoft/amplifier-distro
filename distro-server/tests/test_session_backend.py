@@ -551,6 +551,54 @@ class TestFoundationBackendReconnect:
         assert messages[1]["content"] == "hi there"
 
 
+    async def test_reconnect_chdir_home_if_cwd_deleted(self, bridge_backend):
+        """_reconnect() must chdir to ~ and continue if os.getcwd() raises.
+
+        When the server process's CWD has been deleted, BundleRegistry calls
+        os.getcwd() and raises FileNotFoundError. The fix adds a guard before
+        _load_bundle() that catches this and chdirs to home.
+        """
+        import os
+        import sys
+
+        mock_session = MagicMock()
+        mock_session.session_id = "sess-cwd-001"
+        mock_session.coordinator = MagicMock()
+        mock_context = MagicMock()
+        mock_context.get_messages = AsyncMock(return_value=[])
+        mock_context.set_messages = AsyncMock()
+        mock_session.coordinator.get = MagicMock(return_value=mock_context)
+
+        mock_prepared = MagicMock()
+        mock_prepared.create_session = AsyncMock(return_value=mock_session)
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+        bridge_backend._find_transcript = MagicMock(
+            return_value=[{"role": "user", "content": "hello"}]
+        )
+
+        mock_af_session = MagicMock()
+        mock_af_session.find_orphaned_tool_calls.return_value = []
+
+        home_dir = os.path.expanduser("~")
+
+        with (
+            patch.dict(sys.modules, {"amplifier_foundation.session": mock_af_session}),
+            patch("os.getcwd", side_effect=FileNotFoundError("No such file or directory")),
+            patch("os.chdir") as mock_chdir,
+        ):
+            from amplifier_distro.server.session_backend import FoundationBackend
+
+            handle = await FoundationBackend._reconnect(
+                bridge_backend, "sess-cwd-001"
+            )
+
+        mock_chdir.assert_called_once_with(home_dir)
+        assert handle.session_id == "sess-cwd-001"
+
+        if "sess-cwd-001" in bridge_backend._worker_tasks:
+            bridge_backend._worker_tasks["sess-cwd-001"].cancel()
+
+
 # ── _SessionHandle.cancel ──────────────────────────────────────────────
 
 
