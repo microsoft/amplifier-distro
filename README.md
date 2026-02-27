@@ -1,16 +1,8 @@
 # amplifier-distro
 
-Monorepo for Amplifier distro components.
+Run [Amplifier](https://github.com/microsoft/amplifier) across web, Slack, and voice — all sharing the same agent runtime and memory.
 
-## Projects
-
-## distro server
-
-The [Amplifier Experience Server](distro-server/) — web chat, Slack, voice, and more.
-
-A server that hosts multiple interfaces to Amplifier sessions. It connects
-browsers, Slack workspaces, and voice clients to the same Amplifier runtime,
-with shared memory across all of them.
+`amplifier-distro` is a hosting layer that connects multiple front-end experiences to a single Amplifier session backend. Chat in a browser, pick up the conversation in Slack, or switch to a voice call — same context, same agent, everywhere.
 
 ## Install
 
@@ -18,7 +10,15 @@ with shared memory across all of them.
 curl -fsSL https://raw.githubusercontent.com/microsoft/amplifier-distro/main/install.sh | bash
 ```
 
-### Developer
+Then start the server:
+
+```bash
+amp-distro serve
+```
+
+Open [http://localhost:8400](http://localhost:8400) to start chatting.
+
+## Developer Install
 
 ```bash
 git clone https://github.com/microsoft/amplifier-distro && cd amplifier-distro
@@ -26,7 +26,15 @@ cd distro-server
 uv tool install -e .
 ```
 
-## Usage
+## Experience Apps
+
+| App | Path | Description |
+|-----|------|-------------|
+| Web Chat | `/apps/chat/` | Browser-based chat with session persistence |
+| Slack | `/apps/slack/` | Full Slack bridge via Socket Mode |
+| Voice | `/apps/voice/` | WebRTC voice via OpenAI Realtime API |
+
+## Commands
 
 ### `amp-distro serve` — Start the experience server
 
@@ -34,9 +42,6 @@ uv tool install -e .
 amp-distro serve                 # Foreground on http://localhost:8400
 amp-distro serve --reload        # Auto-reload for development
 ```
-
-The server hosts web chat, Slack bridge, voice interface, and routines
-scheduler. Visit http://localhost:8400/.
 
 ### `amp-distro backup` / `restore` — State backup
 
@@ -57,16 +62,12 @@ amp-distro service uninstall     # Remove the service
 amp-distro service status        # Check service status
 ```
 
-## Experience Apps
-
-| App | Path | Description |
-|-----|------|-------------|
-| Web Chat | `/apps/chat/` | Browser-based chat with session persistence |
-| Slack | `/apps/slack/` | Full Slack bridge via Socket Mode |
-| Voice | `/apps/voice/` | WebRTC voice via OpenAI Realtime API |
-
-## Documents
+## Docs
 
 | File | Description |
 |------|-------------|
-| [distro-server/docs/SLACK_SETUP.md](docs/SLACK_SETUP.md) | Slack bridge setup guide |
+| [distro-server/docs/SLACK_SETUP.md](distro-server/docs/SLACK_SETUP.md) | Slack bridge setup guide |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
