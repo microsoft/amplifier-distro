@@ -14,7 +14,11 @@ import pytest
 import yaml
 
 from amplifier_distro import overlay
-from amplifier_distro.features import AMPLIFIER_START_URI, PROVIDERS, provider_bundle_uri
+from amplifier_distro.features import (
+    AMPLIFIER_START_URI,
+    PROVIDERS,
+    provider_bundle_uri,
+)
 
 # The stale URI that must NOT appear in fresh overlays.
 # Defined independently here so these tests remain valid even after the
@@ -58,7 +62,7 @@ class TestFreshOverlayDoesNotInjectSessionNaming:
             for entry in data.get("includes", [])
         ]
         assert _STALE_URI not in uris, (
-            f"Fresh overlay must not include the stale session-naming URI: {_STALE_URI!r}"
+            f"Fresh overlay must not include stale session-naming URI: {_STALE_URI!r}"
         )
 
     def test_fresh_overlay_still_contains_start_uri(self, overlay_path):
