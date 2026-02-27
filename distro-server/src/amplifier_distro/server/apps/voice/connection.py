@@ -41,6 +41,7 @@ class VoiceConnection:
         self._hook_unregister: Callable[[], None] | None = None
         self._session_id: str | None = None
         self._session_obj: Any = None
+        self._project_id: str | None = None
 
     @property
     def event_queue(self) -> asyncio.Queue:
@@ -51,6 +52,15 @@ class VoiceConnection:
     def session_id(self) -> str | None:
         """The current Amplifier session ID, or None if not yet created."""
         return self._session_id
+
+    @property
+    def project_id(self) -> str | None:
+        """The Amplifier project ID for this session, or None if not yet created.
+
+        Used to locate the Amplifier transcript path:
+        ~/.amplifier/projects/{project_id}/sessions/{session_id}/transcript.jsonl
+        """
+        return self._project_id
 
     async def create(self, workspace_root: str) -> str:
         """Create an Amplifier session for this voice connection.
@@ -78,6 +88,21 @@ class VoiceConnection:
         # 3. Store session references
         self._session_obj = session
         self._session_id = session.session_id
+        self._project_id = getattr(session, "project_id", None)
+
+        # Fallback: if the backend doesn't expose project_id on the session object,
+        # scan the Amplifier projects directory to find which project owns this
+        # session. Without project_id, write_to_amplifier_transcript is never called
+        # and voice sessions remain invisible to the Amplifier chat app.
+        if self._project_id is None and self._session_id is not None:
+            self._project_id = self._find_project_id_from_fs(self._session_id)
+            if self._project_id is None:
+                logger.warning(
+                    "project_id not available for voice session %s; "
+                    "voice sessions will not appear in the Amplifier chat app. "
+                    "Ensure the backend returns project_id on the session object.",
+                    self._session_id,
+                )
 
         # 4. Register 'spawn' capability so delegate tool sub-sessions route through
         #    shared backend (ensures hooks, observability, and session tracking)
@@ -103,14 +128,17 @@ class VoiceConnection:
         )
 
     async def teardown(self) -> None:
-        """Handle client disconnect: mark session disconnected, always unregister hook.
+        """Handle client disconnect: mark session disconnected, always cleanup hook.
 
-        Critical: _hook_unregister() is called unconditionally in finally to prevent
+        Critical: _cleanup_hook() is called unconditionally in finally to prevent
         dead hook accumulation across reconnects that could fire against closed queues.
+
+        Note: _hook_unregister is not yet wired because backend.create_session()
+        handles hook registration internally when event_queue is passed and does not
+        return an unregister callable. Tracked in BACKEND-GAPS.md.
         """
         try:
             if self._session_id is not None:
-                await self._backend.mark_disconnected(self._session_id)
                 self._repository.update_status(self._session_id, "disconnected")
         finally:
             self._cleanup_hook()
@@ -145,3 +173,26 @@ class VoiceConnection:
                 logger.warning("Error unregistering voice event hook", exc_info=True)
             finally:
                 self._hook_unregister = None
+
+    @staticmethod
+    def _find_project_id_from_fs(session_id: str) -> str | None:
+        """Scan ~/.amplifier/projects/ to find the project owning this session.
+
+        Called when the backend session object lacks a project_id attribute.
+        Iterates project directories looking for a sessions/{session_id} subdir.
+        Returns the project directory name (which is the project_id), or None.
+        """
+        from pathlib import Path
+
+        projects_dir = Path.home() / ".amplifier" / "projects"
+        if not projects_dir.exists():
+            return None
+        try:
+            for project_dir in projects_dir.iterdir():
+                if not project_dir.is_dir():
+                    continue
+                if (project_dir / "sessions" / session_id).exists():
+                    return project_dir.name
+        except OSError:
+            logger.debug("Error scanning projects dir for project_id", exc_info=True)
+        return None

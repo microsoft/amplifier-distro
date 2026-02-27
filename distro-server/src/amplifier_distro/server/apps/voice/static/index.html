@@ -200,6 +200,23 @@ body {
   border-bottom-left-radius: 4px;
 }
 
+/* History messages from a prior session are dimmed and italicised */
+.message-bubble.history .bubble-text {
+  opacity: 0.55;
+  font-style: italic;
+}
+
+/* Divider between injected history and the live session */
+.history-divider {
+  text-align: center;
+  color: #555;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  padding: 6px 0;
+  margin: 4px 0;
+  border-top: 1px solid #2a2a2a;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Controls                                                           */
 /* ------------------------------------------------------------------ */
@@ -554,7 +571,7 @@ body {
     // -----------------------------------------------------------------------
     // connect()
     // -----------------------------------------------------------------------
-    const connect = useCallback(async () => {
+    const connect = useCallback(async (initialItems = []) => {
       updateState('connecting');
 
       // Step 1: Fetch ephemeral token from backend
@@ -606,41 +623,77 @@ body {
 
       // Step 6 & 7: On data channel open — two-stage VAD setup
       dc.onopen = () => {
-        // Stage 1: server_vad with noise reduction + transcription
-        const stage1 = {
-          type: 'session.update',
-          session: {
-            turn_detection: {
-              type: 'server_vad',
-              threshold: 0.5,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 500,
-            },
-            noise_reduction: { type: 'near_field' },
-            input_audio_transcription: {
-              model: 'gpt-4o-transcribe',
+        // Stage 1: server_vad with transcription enabled
+        // NOTE: noise_reduction is not a valid GA Realtime API session field; omit it.
+        // Tool definitions registered here (not at client_secrets creation time —
+        // the client_secrets endpoint only accepts model, voice, and instructions).
+        // type:'function' is required by the Realtime API; the flat format without
+        // it is rejected.
+        const TOOLS = [
+          {
+            type: 'function',
+            name: 'delegate',
+            description: 'Delegate a task to the Amplifier agent with the given instruction.',
+            parameters: {
+              type: 'object',
+              properties: {
+                instruction: { type: 'string', description: 'The instruction to pass to Amplifier.' },
+              },
+              required: ['instruction'],
             },
           },
-        };
-        dc.send(JSON.stringify(stage1));
+          {
+            type: 'function',
+            name: 'cancel_current_task',
+            description: 'Cancel the currently running Amplifier task.',
+            parameters: { type: 'object', properties: {} },
+          },
+          {
+            type: 'function',
+            name: 'pause_replies',
+            description: 'Pause assistant replies until resume_replies is called.',
+            parameters: { type: 'object', properties: {} },
+          },
+          {
+            type: 'function',
+            name: 'resume_replies',
+            description: 'Resume assistant replies after pause_replies.',
+            parameters: { type: 'object', properties: {} },
+          },
+        ];
 
-        // Stage 2: semantic_vad — must be sent AFTER initial server_vad
-        // (GA API constraint: semantic_vad cannot be the initial type)
-        setTimeout(() => {
-          if (dc.readyState !== 'open') return;
-          const stage2 = {
-            type: 'session.update',
-            session: {
-              turn_detection: {
-                type: 'semantic_vad',
-                eagerness: 'low',
-                create_response: false,
-                interrupt_response: true,
+        // Configure transcription and VAD using the GA Realtime API nested format.
+        // input_audio_transcription / turn_detection at the top-level session object
+        // are beta API fields; the GA API uses audio.input.transcription and
+        // audio.input.turn_detection.
+        const sessionConfig = {
+          type: 'session.update',
+          session: {
+            type: 'realtime',
+            audio: {
+              input: {
+                transcription: { model: 'gpt-4o-transcribe', language: 'en' },
+                turn_detection: { type: 'server_vad', threshold: 0.5 },
               },
             },
-          };
-          dc.send(JSON.stringify(stage2));
-        }, 100);
+            tools: TOOLS,
+          },
+        };
+        dc.send(JSON.stringify(sessionConfig));
+
+        // Inject resume context items into the Realtime API session (non-empty on
+        // resume only). Sent after session.update so config is already in place.
+        // A response.create follows so the model can greet the user with context.
+        if (initialItems.length > 0) {
+          initialItems.forEach((item) => {
+            dc.send(JSON.stringify({ type: 'conversation.item.create', item }));
+          });
+          setTimeout(() => {
+            if (dc.readyState === 'open') {
+              dc.send(JSON.stringify({ type: 'response.create' }));
+            }
+          }, 200);
+        }
       };
 
       // Step 8: Forward data channel messages to caller
@@ -751,7 +804,7 @@ body {
   // useChatMessages({ sendDataChannelMessage, sessionId })   Task 5.3
   // -------------------------------------------------------------------------
 
-  function useChatMessages({ sendDataChannelMessage, sessionId, checkTranscript }) {
+  function useChatMessages({ sendDataChannelMessage, sessionId, checkTranscript, onPauseReplies, onResumeReplies }) {
     const [messages, setMessages] = useState([]);
     const [responseInProgress, setResponseInProgress] = useState(false);
 
@@ -759,8 +812,15 @@ body {
     const pendingAnnouncements = useRef([]);
     const messageRefs = useRef({});
     const currentStreamingId = useRef(null);
+    // Accumulates assistant streaming deltas so DOM mutations survive re-renders.
+    // When Preact reconciles with msg.content='' it wipes directly-mutated textContent;
+    // the accumulator lets us restore the full text on the next delta or on mount.
+    const streamingAccumulator = useRef('');
     // Shadow ref so async callbacks always see the current responseInProgress value
     const responseInProgressRef = useRef(false);
+    // Tracks the ID of the in-progress user bubble (created on speech_started,
+    // filled on transcription.completed).
+    const streamingUserBubbleId = useRef(null);
 
     // Keep state and ref in sync together
     const setRip = useCallback((val) => {
@@ -778,6 +838,7 @@ body {
     const startAssistantMessage = useCallback(() => {
       const id = 'asst-' + Date.now();
       currentStreamingId.current = id;
+      streamingAccumulator.current = '';
       setMessages((prev) => [...prev, { id, role: 'assistant', content: '' }]);
     }, []);
 
@@ -787,21 +848,79 @@ body {
       setRip(false);
       pendingAnnouncements.current = [];
       currentStreamingId.current = null;
+      streamingAccumulator.current = '';
       messageRefs.current = {};
+      streamingUserBubbleId.current = null;
     }, [setRip]);
+
+    // loadHistoryMessages(contextItems): populate messages from resume context.
+    // Only message-type items (user/assistant) are shown; tool call items are
+    // injected into the model via the data channel but not displayed here.
+    // Messages are marked isHistory:true so the render can dim them and insert
+    // a visual divider between the prior session and the live one.
+    const loadHistoryMessages = useCallback((contextItems) => {
+      const historyMsgs = contextItems
+        .filter((item) => item.type === 'message' && (item.role === 'user' || item.role === 'assistant'))
+        .map((item, i) => ({
+          id: 'history-' + i + '-' + Date.now(),
+          role: item.role,
+          content: (item.content && item.content[0] && item.content[0].text) || '',
+          isHistory: true,
+        }));
+      if (historyMsgs.length > 0) {
+        setMessages(historyMsgs);
+      }
+    }, []);
 
     // handleDataChannelEvent(event) async — main OpenAI Realtime event dispatcher
     const handleDataChannelEvent = useCallback(async (event) => {
       const { type } = event;
       console.debug('[useChatMessages] event:', type);
 
-      // VAD speech detection — no UI change needed
-      if (type === 'input_audio_buffer.speech_started') return;
+      // Log OpenAI API errors immediately — the most common silent failure is a
+      // rejected session.update (wrong model name, invalid tool format, etc.).
+      // Without this, session.update failures are dropped and we never know why
+      // transcription or tools don't work.
+      if (type === 'error') {
+        console.error('[VoiceApp] OpenAI Realtime API error:', JSON.stringify(event, null, 2));
+        return;
+      }
 
-      // User finished speaking — show transcription, wake-word check, trigger reply if idle
+      // Confirm session config was applied (or spot a partial failure)
+      if (type === 'session.updated') {
+        const s = event.session || {};
+        console.log(
+          '[VoiceApp] session.updated — transcription:',
+          JSON.stringify(s.audio?.input?.transcription),
+          '| tools:', (s.tools || []).map((t) => t.name).join(', ') || 'none',
+          '| turn_detection:', s.audio?.input?.turn_detection?.type,
+        );
+        return;
+      }
+
+      // User started speaking — create an empty streaming bubble immediately.
+      // The bubble will be filled with the transcript when transcription.completed fires.
+      if (type === 'input_audio_buffer.speech_started') {
+        const id = 'user-' + Date.now();
+        streamingUserBubbleId.current = id;
+        setMessages((prev) => [...prev, { id, role: 'user', content: '\u2026' }]);
+        return;
+      }
+
+      // User finished speaking — fill the streaming bubble with transcript text.
       if (type === 'conversation.item.input_audio_transcription.completed') {
         const transcript = event.transcript || '';
-        addUserMessage(transcript, event.item_id);
+        const bubbleId = streamingUserBubbleId.current;
+        if (bubbleId) {
+          // Fill the existing streaming bubble created on speech_started.
+          setMessages((prev) =>
+            prev.map((m) => (m.id === bubbleId ? { ...m, content: transcript } : m))
+          );
+          streamingUserBubbleId.current = null;
+        } else {
+          // Fallback: no streaming bubble exists (e.g. speech_started was missed).
+          addUserMessage(transcript, event.item_id);
+        }
         // Task 5.4: run wake-word detection before auto-respond decision
         if (checkTranscript) checkTranscript(transcript);
         if (!responseInProgressRef.current) {
@@ -810,29 +929,75 @@ body {
         return;
       }
 
-      // Streaming assistant text — DIRECT DOM mutation, zero Preact rerenders
-      if (type === 'response.audio_transcript.delta') {
+      // Streaming assistant text — accumulate into the ref AND update React state.
+      // Direct DOM mutation is unreliable because Preact reconciliation overwrites
+      // textContent whenever msg.content='' is in state. Updating state on each delta
+      // keeps Preact's VDOM in sync so reconciliation never blanks the bubble.
+      // Bubble is created lazily here (not in response.created) so tool-call-only
+      // responses never leave an empty orphan bubble in the UI.
+      if (type === 'response.output_audio_transcript.delta') {
+        if (!currentStreamingId.current) {
+          startAssistantMessage();
+        }
         const id = currentStreamingId.current;
-        if (id && messageRefs.current[id]) {
-          messageRefs.current[id].textContent += event.delta || '';
+        if (id) {
+          streamingAccumulator.current += event.delta || '';
+          const accumulated = streamingAccumulator.current;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === id ? { ...m, content: accumulated } : m))
+          );
         }
         return;
       }
 
-      // Streaming finished — commit final transcript to state
-      if (type === 'response.audio_transcript.done') {
+      // Streaming finished — commit final transcript to state.
+      // Use event.transcript if provided; fall back to locally-accumulated value
+      // in case the API omits it or the connection was degraded.
+      if (type === 'response.output_audio_transcript.done') {
         const id = currentStreamingId.current;
+        const finalText = event.transcript || streamingAccumulator.current || '';
         setMessages((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, content: event.transcript || '' } : m))
+          prev.map((m) => (m.id === id ? { ...m, content: finalText } : m))
         );
         currentStreamingId.current = null;
+        streamingAccumulator.current = '';
         return;
       }
 
-      // Response cycle started
+      // Text-modality response streaming (fires when modality includes "text").
+      // Mirrors the audio_transcript path — same lazy bubble creation, same accumulator.
+      if (type === 'response.output_text.delta') {
+        if (!currentStreamingId.current) {
+          startAssistantMessage();
+        }
+        const id = currentStreamingId.current;
+        if (id) {
+          streamingAccumulator.current += event.delta || '';
+          const accumulated = streamingAccumulator.current;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === id ? { ...m, content: accumulated } : m))
+          );
+        }
+        return;
+      }
+
+      if (type === 'response.output_text.done') {
+        const id = currentStreamingId.current;
+        // event.text (not event.transcript) is the field for text-modality done events
+        const finalText = event.text || streamingAccumulator.current || '';
+        setMessages((prev) =>
+          prev.map((m) => (m.id === id ? { ...m, content: finalText } : m))
+        );
+        currentStreamingId.current = null;
+        streamingAccumulator.current = '';
+        return;
+      }
+
+      // Response cycle started — bubble is created lazily on the first
+      // audio_transcript.delta or output_text.delta so tool-call-only responses
+      // never produce an empty orphan bubble.
       if (type === 'response.created') {
         setRip(true);
-        startAssistantMessage();
         return;
       }
 
@@ -855,18 +1020,36 @@ body {
         const callId = item.call_id;
         const args = item.arguments || '{}';
 
-        // Browser-side tools — TODO 5.4: handle pause_replies / resume_replies
-        if (toolName === 'pause_replies' || toolName === 'resume_replies') return;
+        // Browser-side pause/resume tools — handled locally, no server round-trip.
+        // Send function_call_output so the model's tool call is correctly closed out.
+        if (toolName === 'pause_replies') {
+          if (onPauseReplies) onPauseReplies();
+          sendDataChannelMessage({
+            type: 'conversation.item.create',
+            item: { type: 'function_call_output', call_id: callId, output: JSON.stringify({ result: 'paused' }) },
+          });
+          return;
+        }
+        if (toolName === 'resume_replies') {
+          if (onResumeReplies) onResumeReplies();
+          sendDataChannelMessage({
+            type: 'conversation.item.create',
+            item: { type: 'function_call_output', call_id: callId, output: JSON.stringify({ result: 'resumed' }) },
+          });
+          sendDataChannelMessage({ type: 'response.create' });
+          return;
+        }
 
         // Execute tool on the server
+        // NOTE: server reads body.get("name"), not "tool_name"
         let output;
         try {
           const resp = await fetch('/apps/voice/tools/execute', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              tool_name: toolName,
-              arguments: args,
+              name: toolName,
+              arguments: typeof args === 'string' ? JSON.parse(args) : args,
               call_id: callId,
               session_id: sessionId,
             }),
@@ -891,9 +1074,9 @@ body {
           pendingAnnouncements.current.push({ type: 'response.create' });
         }
       }
-    }, [sendDataChannelMessage, sessionId, addUserMessage, startAssistantMessage, setRip]);
+    }, [sendDataChannelMessage, sessionId, addUserMessage, startAssistantMessage, setRip, onPauseReplies, onResumeReplies]);
 
-    return { messages, responseInProgress, messageRefs, handleDataChannelEvent, clearMessages };
+    return { messages, responseInProgress, messageRefs, handleDataChannelEvent, clearMessages, loadHistoryMessages };
   }
 
   // -------------------------------------------------------------------------
@@ -1113,7 +1296,7 @@ body {
       sendDataChannelMessage({
         type: 'session.update',
         session: {
-          turn_detection: { type: 'semantic_vad', create_response: false },
+          turn_detection: { type: 'semantic_vad', eagerness: 'medium', create_response: false },
         },
       });
     }, [sendDataChannelMessage]);
@@ -1124,7 +1307,7 @@ body {
       sendDataChannelMessage({
         type: 'session.update',
         session: {
-          turn_detection: { type: 'semantic_vad', create_response: true },
+          turn_detection: { type: 'semantic_vad', eagerness: 'medium', create_response: true },
         },
       });
     }, [sendDataChannelMessage]);
@@ -1314,7 +1497,7 @@ body {
 
       setCancelling(true);
       try {
-        await fetch('/cancel', {
+        await fetch('/apps/voice/cancel', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session_id: sessionId, immediate }),
@@ -1397,7 +1580,7 @@ body {
     // Task 5.4: fetch assistant name on mount (default: 'Amplifier')
     const [assistantName, setAssistantName] = useState('Amplifier');
     useEffect(() => {
-      fetch('/api/status')
+      fetch('/apps/voice/api/status')
         .then((r) => r.json())
         .then((data) => { if (data.assistant_name) setAssistantName(data.assistant_name); })
         .catch(() => { /* silent — keep default 'Amplifier' */ });
@@ -1484,7 +1667,14 @@ body {
       messageRefs,
       handleDataChannelEvent,
       clearMessages,
-    } = useChatMessages({ sendDataChannelMessage, sessionId, checkTranscript });
+      loadHistoryMessages,
+    } = useChatMessages({
+      sendDataChannelMessage,
+      sessionId,
+      checkTranscript,
+      onPauseReplies: enterPauseReplies,
+      onResumeReplies: exitPauseReplies,
+    });
 
     // Wire latest handler into stable ref on every render (ref mutation, no rerender)
     msgHandlerRef.current = handleDataChannelEvent;
@@ -1503,22 +1693,69 @@ body {
       transcriptRef.current = messages;
     }, [messages]);
 
-    // Task 5.6: sendBeacon transcript sync on page unload
+    // Keep sessionId in a ref so async callbacks always see the current value
+    // without needing to capture it in useCallback deps (avoids stale closures).
+    const sessionIdRef = useRef(null);
+    useEffect(() => {
+      sessionIdRef.current = sessionId;
+    }, [sessionId]);
+
+    // Track how many entries have already been synced to avoid sending duplicates
+    // when both the periodic sync and sendBeacon are active.
+    const syncedCountRef = useRef(0);
+
+    // Sync unsynced transcript entries to the server. Stable ref — no deps needed
+    // because it reads sessionId and entries through refs, not closed-over state.
+    // Safe to call from intervals, event handlers, and async disconnect flows.
+    const syncTranscript = useCallback(async () => {
+      const sid = sessionIdRef.current;
+      if (!sid) return;
+      const allEntries = transcriptRef.current;
+      const unsynced = allEntries.slice(syncedCountRef.current);
+      if (unsynced.length === 0) return;
+      try {
+        const resp = await fetch(`/apps/voice/sessions/${sid}/transcript`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entries: unsynced }),
+        });
+        if (resp.ok) {
+          syncedCountRef.current = allEntries.length;
+        }
+      } catch (err) {
+        console.warn('[VoiceApp] Transcript sync failed:', err);
+      }
+    }, []);
+
+    // Task 5.6: sendBeacon on page unload — last-resort flush of unsynced entries.
+    // Only sends entries not already persisted by the periodic sync.
     useEffect(() => {
       if (!sessionId) return;
 
       const handleBeforeUnload = () => {
-        const entries = transcriptRef.current;
-        if (!entries || entries.length === 0) return;
+        const allEntries = transcriptRef.current;
+        if (!allEntries || allEntries.length === 0) return;
+        // Only send what the periodic sync hasn't already persisted
+        const unsyncedEntries = allEntries.slice(syncedCountRef.current);
+        if (unsyncedEntries.length === 0) return;
         navigator.sendBeacon(
           `/apps/voice/sessions/${sessionId}/transcript`,
-          JSON.stringify(entries),
+          JSON.stringify({ entries: unsyncedEntries }),
         );
       };
 
       window.addEventListener('beforeunload', handleBeforeUnload);
       return () => window.removeEventListener('beforeunload', handleBeforeUnload);
     }, [sessionId]);
+
+    // Periodic transcript sync every 30 s while a session is active.
+    // Ensures conversations are persisted even without a clean page close
+    // (network drop, browser crash, or tab killed mid-session).
+    useEffect(() => {
+      if (!sessionId) return;
+      const id = setInterval(() => { syncTranscript(); }, 30000);
+      return () => clearInterval(id);
+    }, [sessionId, syncTranscript]);
 
     // Scroll transcript to bottom when new messages arrive
     useEffect(() => {
@@ -1534,10 +1771,18 @@ body {
       try {
         const resp = await fetch(`/apps/voice/sessions/${resumeSessionId}/resume`, { method: 'POST' });
         if (!resp.ok) throw new Error(`Resume failed: ${resp.status}`);
+        const resumeData = await resp.json();
         setSessionId(resumeSessionId);
         console.debug('[VoiceApp] Session resumed:', resumeSessionId);
 
-        await connect();
+        // Populate message history from prior session transcript so the user
+        // can see the previous conversation while the live session loads.
+        const contextItems = resumeData.context_to_inject || [];
+        loadHistoryMessages(contextItems);
+
+        // Connect WebRTC and inject prior context into the Realtime API session
+        // so the voice model has memory of the previous conversation.
+        await connect(contextItems);
         setMicStream(streamRef.current);
         healthManagerRef.current.startSession();
       } catch (err) {
@@ -1547,7 +1792,7 @@ body {
       } finally {
         setIsConnecting(false);
       }
-    }, [connect, disconnect, setMicStream, streamRef]);
+    }, [connect, disconnect, setMicStream, streamRef, loadHistoryMessages]);
 
     // handleConnect: POST /apps/voice/sessions then initiate WebRTC
     const handleConnect = useCallback(async () => {
@@ -1583,12 +1828,16 @@ body {
       }
     }, [connect, disconnect, setMicStream, streamRef]);
 
-    const handleDisconnect = useCallback(() => {
+    const handleDisconnect = useCallback(async () => {
+      // Sync any remaining transcript entries before tearing down the session
+      // so the last few messages are persisted even on a clean disconnect.
+      await syncTranscript();
       disconnect();
       clearMessages();
+      syncedCountRef.current = 0;
       setSessionId(null);
       setError(null);
-    }, [disconnect, clearMessages]);
+    }, [disconnect, clearMessages, syncTranscript]);
 
     // Derive display state
     const isIdle = rtcState === 'idle';
@@ -1633,14 +1882,20 @@ body {
         <div class="transcript-container">
           ${messages.length === 0
             ? html`<div class="transcript-empty">No messages yet. Start a voice chat to begin.</div>`
-            : messages.map((msg) => html`
-                <div key=${msg.id} class=${'message-bubble ' + msg.role}>
+            : messages.map((msg, idx) => html`
+                ${!msg.isHistory && idx > 0 && messages[idx - 1].isHistory && html`
+                  <div class="history-divider">Prior session above — live session below</div>
+                `}
+                <div key=${msg.id} class=${'message-bubble ' + msg.role + (msg.isHistory ? ' history' : '')}>
                   <div class="bubble-label">${msg.role}</div>
                   <div
                     class="bubble-text"
                     ref=${(el) => {
-                      if (el) messageRefs.current[msg.id] = el;
-                      else delete messageRefs.current[msg.id];
+                      if (el) {
+                        messageRefs.current[msg.id] = el;
+                      } else {
+                        delete messageRefs.current[msg.id];
+                      }
                     }}
                   >${msg.content}</div>
                 </div>

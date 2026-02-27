@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 
 def new_entry_id() -> str:
@@ -60,12 +60,14 @@ class VoiceConversation:
 
     id: str
     title: str
-    status: str  # active | disconnected | ended
+    status: Literal["active", "disconnected", "ended"]
     created_at: datetime
     updated_at: datetime
     ended_at: datetime | None = None
-    # Valid values: session_limit | network_error | user_ended | idle_timeout | error
-    end_reason: str | None = None
+    end_reason: (
+        Literal["session_limit", "network_error", "user_ended", "idle_timeout", "error"]
+        | None
+    ) = None
     duration_seconds: float | None = None
     first_message: str | None = None
     last_message: str | None = None

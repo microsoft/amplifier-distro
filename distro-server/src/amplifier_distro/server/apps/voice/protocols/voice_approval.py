@@ -16,6 +16,11 @@ class VoiceApprovalSystem:
 
     Safe tools are auto-approved. Dangerous tools push an SSE
     approval_request event to the queue and await a handle_response call.
+
+    Concurrency contract: only one approval may be in flight at a time.
+    Tool calls execute sequentially in the voice session loop, so this is
+    guaranteed by the caller. An assertion in request_approval enforces the
+    contract and will surface any future misuse immediately.
     """
 
     SAFE_TOOLS: ClassVar[set[str]] = {
@@ -78,6 +83,10 @@ class VoiceApprovalSystem:
         )
 
         if is_dangerous:
+            assert self._pending_event is None, (
+                "VoiceApprovalSystem does not support concurrent approvals; "
+                "a previous request_approval call is still pending"
+            )
             request_id = str(uuid.uuid4())
             spoken_prompt = self.generate_spoken_prompt(tool_name, arguments)
             event: dict[str, Any] = {
@@ -91,6 +100,7 @@ class VoiceApprovalSystem:
             self._pending_result = False
             await self._queue.put(event)
             await self._pending_event.wait()
+            self._pending_event = None  # Reset so the next approval can proceed
             return self._pending_result
 
         # Unknown tool with no dangerous pattern: auto-approve
