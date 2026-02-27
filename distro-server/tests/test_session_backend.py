@@ -6,6 +6,7 @@ without a real Amplifier installation.
 """
 
 import asyncio
+import os
 import sys
 import unittest.mock
 from pathlib import Path
@@ -557,8 +558,7 @@ class TestFoundationBackendReconnect:
         os.getcwd() and raises FileNotFoundError. The fix adds a guard before
         _load_bundle() that catches this and chdirs to home.
         """
-        import os
-        import sys
+        from amplifier_distro.server.session_backend import FoundationBackend
 
         mock_session = MagicMock()
         mock_session.session_id = "sess-cwd-001"
@@ -582,21 +582,16 @@ class TestFoundationBackendReconnect:
 
         with (
             patch.dict(sys.modules, {"amplifier_foundation.session": mock_af_session}),
-            patch("os.getcwd", side_effect=FileNotFoundError("No such file or directory")),
+            patch("os.getcwd", side_effect=FileNotFoundError("No such file")),
             patch("os.chdir") as mock_chdir,
         ):
-            from amplifier_distro.server.session_backend import FoundationBackend
-
-            handle = await FoundationBackend._reconnect(
-                bridge_backend, "sess-cwd-001"
-            )
+            handle = await FoundationBackend._reconnect(bridge_backend, "sess-cwd-001")
 
         mock_chdir.assert_called_once_with(home_dir)
         assert handle.session_id == "sess-cwd-001"
 
         if "sess-cwd-001" in bridge_backend._worker_tasks:
             bridge_backend._worker_tasks["sess-cwd-001"].cancel()
-
 
 
 # ── _SessionHandle.cancel ──────────────────────────────────────────────
