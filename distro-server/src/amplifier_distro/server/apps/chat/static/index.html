@@ -2638,7 +2638,8 @@
 
     // —— WebSocket connection ————————————————————————————————————————
     const connect = useCallback((sessionKey) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) return;
+      const rs = wsRef.current?.readyState;
+      if (rs === WebSocket.OPEN || rs === WebSocket.CONNECTING) return;
       setWsStatus('connecting');
 
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -2672,7 +2673,7 @@
         if (activeKeyRef.current === sessionKey) {
           setWsStatus('disconnected');
           if (e.code !== 4001 && e.code !== 4003) {
-            setTimeout(() => connect(sessionKey), 3000);
+            setTimeout(() => connect(activeKeyRef.current), 3000);
           }
         }
       };
@@ -2916,6 +2917,10 @@
       const onFocus = () => discoverNewHistorySessions();
       const onVisibility = () => {
         if (document.visibilityState === 'visible') {
+          const rs = wsRef.current?.readyState;
+          if (rs == null || rs === WebSocket.CLOSED || rs === WebSocket.CLOSING) {
+            connect(activeKeyRef.current);
+          }
           discoverNewHistorySessions();
         }
       };
@@ -2930,7 +2935,7 @@
         window.removeEventListener('focus', onFocus);
         document.removeEventListener('visibilitychange', onVisibility);
       };
-    }, [discoverNewHistorySessions]);
+    }, [connect, discoverNewHistorySessions]);
 
     useEffect(() => {
       if (sessionSortMode !== 'directory') return;
