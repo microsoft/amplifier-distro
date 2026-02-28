@@ -378,15 +378,29 @@ class FoundationBackend:
         """
         logger.info("Reloading bundle...")
         self._prepared_bundle = None  # Invalidate cache so _load_bundle() does real I/O
-        try:
-            self._prepared_bundle = await self._load_bundle()
-        except Exception:
-            logger.warning("Bundle reload failed", exc_info=True)
-            raise
+        self._prepared_bundle = await self._load_bundle()
         self._bundle_version = self._compute_bundle_version()
         logger.info("Bundle reloaded")
 
-        # Notify active session surfaces (surface notification loop added in Task 7-8)
+        # Notify all active sessions via their surface's on_bundle_reload callback.
+        # Each surface defines its own restart policy (web chat, Slack, headless).
+        # Use getattr(..., None) so this works before fix/approval-display lands
+        # (handles that predate SessionSurface have no surface attribute).
+        for session_id, handle in list(self._sessions.items()):
+            surface = getattr(handle, "surface", None)
+            if surface is None:
+                continue
+            on_reload = getattr(surface, "on_bundle_reload", None)
+            if on_reload is None:
+                continue
+            try:
+                await on_reload()
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Error calling on_bundle_reload for session %s",
+                    session_id,
+                    exc_info=True,
+                )
 
     def _compute_bundle_version(self) -> str:
         """Return a version string based on overlay file mtime. Stub — see Task 10."""

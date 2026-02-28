@@ -1185,22 +1185,6 @@ class TestFoundationBackendReloadBundle:
 
         assert bridge_backend._bundle_version == "9999.0"
 
-    async def test_reload_bundle_logs_warning_on_failure(self, bridge_backend):
-        """reload_bundle() logs a warning before re-raising on load failure."""
-        bridge_backend._load_bundle = AsyncMock(side_effect=RuntimeError("load failed"))
-
-        from amplifier_distro.server.session_backend import FoundationBackend
-
-        with (
-            patch("amplifier_distro.server.session_backend.logger") as mock_logger,
-            pytest.raises(RuntimeError, match="load failed"),
-        ):
-            await FoundationBackend.reload_bundle(bridge_backend)
-
-        mock_logger.warning.assert_called_once()
-        call_kwargs = mock_logger.warning.call_args
-        assert call_kwargs.kwargs.get("exc_info") is True
-
     async def test_reload_bundle_calls_on_bundle_reload_on_active_surfaces(
         self, bridge_backend
     ):
