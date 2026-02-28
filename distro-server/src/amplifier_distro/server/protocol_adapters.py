@@ -189,3 +189,48 @@ def headless_surface() -> SessionSurface:
         approval_system=ApprovalSystem(auto_approve=True),
         display_system=LogDisplaySystem(),
     )
+
+
+def web_chat_surface(queue: asyncio.Queue) -> SessionSurface:  # type: ignore[type-arg]
+    """Create a SessionSurface for interactive web chat connections.
+
+    Intended for browser WebSocket connections where approvals are interactive
+    and display messages are pushed to the client via the event queue.
+    Approval requests are pushed as ('approval_request', {...}) tuples.
+    Display messages are pushed as ('display_message', {...}) tuples.
+    """
+
+    async def _on_approval_request(
+        request_id: str,
+        prompt: str,
+        options: list[str],
+        timeout: float,
+        default: str,
+    ) -> None:
+        try:
+            queue.put_nowait(
+                (
+                    "approval_request",
+                    {
+                        "request_id": request_id,
+                        "prompt": prompt,
+                        "options": options,
+                        "timeout": timeout,
+                        "default": default,
+                    },
+                )
+            )
+        except asyncio.QueueFull:
+            logger.warning(
+                "Queue full; approval_request event dropped for request_id=%s",
+                request_id,
+            )
+
+    return SessionSurface(
+        event_queue=queue,
+        approval_system=ApprovalSystem(
+            on_approval_request=_on_approval_request,
+            auto_approve=False,
+        ),
+        display_system=QueueDisplaySystem(queue),
+    )
