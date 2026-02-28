@@ -966,12 +966,21 @@ class TestFoundationBackendBundleCache:
         """Cache hit: when _prepared_bundle is set, _load_bundle returns it directly.
 
         Once pre-warmed, no I/O or foundation loading should occur.
+
+        RED: fails with AttributeError because FoundationBackend does not yet
+        initialize _prepared_bundle in __init__ (attribute absent on instance).
+        GREEN: passes once __init__ sets self._prepared_bundle = None and
+        _load_bundle() returns it on cache hit.
         """
         mock_bundle = MagicMock()
-        bridge_backend._prepared_bundle = mock_bundle
 
         from amplifier_distro.server.session_backend import FoundationBackend
 
+        # Reading the attribute before it is initialized confirms it does not
+        # exist yet.  This is the canonical RED signal: AttributeError here.
+        assert bridge_backend._prepared_bundle is None  # fails until impl
+
+        bridge_backend._prepared_bundle = mock_bundle
         result = await FoundationBackend._load_bundle(bridge_backend)
         assert result is mock_bundle
 
@@ -981,13 +990,20 @@ class TestFoundationBackendBundleCache:
         """Cache miss: _prepared_bundle=None forces _load_bundle to attempt real load.
 
         It must NOT silently return None — it must raise (ImportError/AttributeError)
-        because amplifier_foundation is not installed in the test environment.
+        because a real load with a dummy bundle name will fail.
         This guards against an implementation bug where the cache always returns
         the stored value even when it is explicitly None.
-        """
-        bridge_backend._prepared_bundle = None
 
+        RED: fails with AttributeError because _prepared_bundle is not yet an
+        attribute on FoundationBackend instances.
+        GREEN: passes once __init__ initializes _prepared_bundle and _load_bundle()
+        falls through to the real load path when it is None.
+        """
         from amplifier_distro.server.session_backend import FoundationBackend
 
+        # Same RED signal: attribute does not exist yet.
+        assert bridge_backend._prepared_bundle is None  # fails until impl
+
+        # _prepared_bundle is already None (default); real load must raise.
         with pytest.raises((ImportError, AttributeError)):
             await FoundationBackend._load_bundle(bridge_backend)
