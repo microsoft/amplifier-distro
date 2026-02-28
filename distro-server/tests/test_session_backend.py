@@ -1215,9 +1215,7 @@ class TestFoundationBackendReloadBundle:
         on_reload_a.assert_awaited_once()
         on_reload_b.assert_awaited_once()
 
-    async def test_reload_bundle_skips_sessions_without_surface(
-        self, bridge_backend
-    ):
+    async def test_reload_bundle_skips_sessions_without_surface(self, bridge_backend):
         """reload_bundle() skips sessions whose handle has no surface — must not raise."""
         new_bundle = MagicMock(name="new_bundle")
         bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
@@ -1270,9 +1268,7 @@ class TestFoundationBackendReloadBundle:
 
         on_reload_b.assert_awaited_once()
 
-    async def test_reload_bundle_continues_past_surface_error(
-        self, bridge_backend
-    ):
+    async def test_reload_bundle_continues_past_surface_error(self, bridge_backend):
         """reload_bundle() continues to other surfaces when one raises — must not raise."""
         new_bundle = MagicMock(name="new_bundle")
         bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
@@ -1299,3 +1295,53 @@ class TestFoundationBackendReloadBundle:
         await FoundationBackend.reload_bundle(bridge_backend)  # must not raise
 
         on_reload_b.assert_awaited_once()
+
+
+# ── FoundationBackend._compute_bundle_version ─────────────────────────────────
+
+
+class TestFoundationBackendComputeBundleVersion:
+    """_compute_bundle_version() returns mtime string of overlay bundle.yaml."""
+
+    def test_returns_empty_string_when_no_overlay(self, bridge_backend):
+        """Returns '' when overlay does not exist."""
+        with patch("amplifier_distro.overlay.overlay_exists", return_value=False):
+            from amplifier_distro.server.session_backend import FoundationBackend
+
+            version = FoundationBackend._compute_bundle_version(bridge_backend)
+
+        assert version == ""
+
+    def test_returns_mtime_string_when_overlay_bundle_yaml_exists(
+        self, bridge_backend, tmp_path
+    ):
+        """Returns str(bundle_yaml.stat().st_mtime) when overlay bundle.yaml exists."""
+        bundle_yaml = tmp_path / "bundle.yaml"
+        bundle_yaml.write_text("bundle:\n  name: test\n")
+
+        with (
+            patch("amplifier_distro.overlay.overlay_exists", return_value=True),
+            patch("amplifier_distro.overlay.overlay_dir", return_value=tmp_path),
+        ):
+            from amplifier_distro.server.session_backend import FoundationBackend
+
+            version = FoundationBackend._compute_bundle_version(bridge_backend)
+
+        expected = str(bundle_yaml.stat().st_mtime)
+        assert version == expected
+        assert version != ""
+
+    def test_returns_empty_string_when_overlay_dir_exists_but_bundle_yaml_missing(
+        self, bridge_backend, tmp_path
+    ):
+        """Returns '' when overlay exists but bundle.yaml is absent."""
+        # tmp_path exists but has no bundle.yaml
+        with (
+            patch("amplifier_distro.overlay.overlay_exists", return_value=True),
+            patch("amplifier_distro.overlay.overlay_dir", return_value=tmp_path),
+        ):
+            from amplifier_distro.server.session_backend import FoundationBackend
+
+            version = FoundationBackend._compute_bundle_version(bridge_backend)
+
+        assert version == ""
