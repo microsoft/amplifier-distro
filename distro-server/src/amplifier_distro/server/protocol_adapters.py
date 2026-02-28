@@ -11,10 +11,30 @@ import asyncio
 import inspect
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SessionSurface:
+    """Container for the surface dependencies of a single agent session.
+
+    web_chat_surface: Fully wired surface with event_queue, approval_system,
+      display_system, and on_bundle_reload — used when a WebSocket client is
+      connected and the session is interactive.
+
+    headless_surface: All fields are None (defaults) — used when running
+      without a client (e.g. batch/CLI mode) where no queue or interactive
+      approval is needed.
+    """
+
+    event_queue: asyncio.Queue | None = field(default=None)  # type: ignore[type-arg]
+    approval_system: Any | None = field(default=None)
+    display_system: Any | None = field(default=None)
+    on_bundle_reload: Callable[[], Awaitable[None]] | None = field(default=None)
 
 
 class ApprovalSystem:
