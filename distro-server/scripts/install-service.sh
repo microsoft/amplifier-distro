@@ -2,7 +2,7 @@
 # Install amplifier-distro as a systemd user service.
 #
 # This script:
-#   1. Detects the amp-distro-server binary location
+#   1. Detects the amp-distro binary location
 #   2. Generates a service file with the correct ExecStart path
 #   3. Enables and starts the service via systemd --user
 #
@@ -20,16 +20,16 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SERVICE_TEMPLATE="$SCRIPT_DIR/amplifier-distro.service"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 
-# Detect amp-distro-server location
-AMP_SERVER=$(command -v amp-distro-server 2>/dev/null || true)
+# Detect amp-distro location
+AMP_SERVER=$(command -v amp-distro 2>/dev/null || true)
 if [ -z "$AMP_SERVER" ]; then
-    echo "Error: amp-distro-server not found in PATH."
+    echo "Error: amp-distro not found in PATH."
     echo "Install amplifier-distro first:"
     echo "  uv pip install amplifier-distro"
     exit 1
 fi
 
-echo "Found amp-distro-server at: $AMP_SERVER"
+echo "Found amp-distro at: $AMP_SERVER"
 
 # Verify template exists
 if [ ! -f "$SERVICE_TEMPLATE" ]; then
@@ -41,7 +41,7 @@ fi
 mkdir -p "$SYSTEMD_USER_DIR"
 
 # Generate service file with correct ExecStart path
-sed "s|ExecStart=.*|ExecStart=$AMP_SERVER --host 127.0.0.1 --port 8400|" \
+sed "s|ExecStart=.*|ExecStart=$AMP_SERVER serve --host 127.0.0.1 --port 8400|" \
     "$SERVICE_TEMPLATE" > "$SYSTEMD_USER_DIR/amplifier-distro.service"
 
 echo "Installed service file to $SYSTEMD_USER_DIR/amplifier-distro.service"

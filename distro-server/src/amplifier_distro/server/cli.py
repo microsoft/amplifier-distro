@@ -1,14 +1,14 @@
 """CLI entry point for the distro server.
 
 Usage:
-    amp-distro-server [OPTIONS]                # foreground mode (default)
-    amp-distro-server start [OPTIONS]          # start as background daemon
-    amp-distro-server stop                     # stop background daemon
-    amp-distro-server restart [OPTIONS]        # restart background daemon
-    amp-distro-server status                   # check daemon status
-    amp-distro-server watchdog start           # start health watchdog
-    amp-distro-server watchdog stop            # stop health watchdog
-    amp-distro-server watchdog status          # check watchdog status
+    amp-distro serve [OPTIONS]                # foreground mode (default)
+    amp-distro serve start [OPTIONS]          # start as background daemon
+    amp-distro serve stop                     # stop background daemon
+    amp-distro serve restart [OPTIONS]        # restart background daemon
+    amp-distro serve status                   # check daemon status
+    amp-distro serve watchdog start           # start health watchdog
+    amp-distro serve watchdog stop            # stop health watchdog
+    amp-distro serve watchdog status          # check watchdog status
     python -m amplifier_distro.server [OPTIONS]  # via module (foreground)
 """
 
@@ -22,7 +22,7 @@ import click
 from amplifier_distro import conventions
 
 
-@click.group("amp-distro-server", invoke_without_command=True)
+@click.group("amp-distro-serve", invoke_without_command=True)
 @click.option(
     "--host",
     default="127.0.0.1",

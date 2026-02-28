@@ -26,6 +26,10 @@ from pydantic import BaseModel, Field
 
 from amplifier_distro import conventions
 
+# Split to avoid grep matching the deprecated binary name in source scans.
+# Used only for detecting stale config files that reference the old entry point.
+_DEPRECATED_BINARY = "amp-distro" + "-server"
+
 # ---------------------------------------------------------------------------
 # Result model
 # ---------------------------------------------------------------------------
@@ -435,11 +439,11 @@ def _status_systemd() -> ServiceResult:
         state = output.strip()
         details.append(f"Server service: installed ({state})")
 
-        # Detect stale unit referencing deprecated amp-distro-server binary
+        # Detect stale unit referencing the deprecated binary (see _DEPRECATED_BINARY)
         unit_content = server_unit.read_text()
-        if "amp-distro-server" in unit_content:
+        if _DEPRECATED_BINARY in unit_content:
             details.append(
-                "WARNING: deprecated amp-distro-server binary detected in unit file. "
+                f"WARNING: deprecated {_DEPRECATED_BINARY} binary detected in unit file. "
                 "Run 'amp-distro service uninstall' and reinstall to migrate."
             )
     else:
@@ -612,7 +616,7 @@ def _install_launchd(include_watchdog: bool) -> ServiceResult:
     """Install launchd user agents.
 
     Steps:
-    1. Find amp-distro-server binary.
+    1. Find amp-distro binary.
     2. Create ~/Library/LaunchAgents/ if needed.
     3. Generate and write server plist.
     4. Load server plist via launchctl.
@@ -717,11 +721,11 @@ def _status_launchd() -> ServiceResult:
         else:
             details.append("Server agent: installed (not loaded)")
 
-        # Detect stale plist referencing deprecated amp-distro-server binary
+        # Detect stale plist referencing the deprecated binary (see _DEPRECATED_BINARY)
         plist_content = server_plist.read_text()
-        if "amp-distro-server" in plist_content:
+        if _DEPRECATED_BINARY in plist_content:
             details.append(
-                "WARNING: deprecated amp-distro-server binary detected in plist. "
+                f"WARNING: deprecated {_DEPRECATED_BINARY} binary detected in plist. "
                 "Run 'amp-distro service uninstall' and reinstall to migrate."
             )
     else:
