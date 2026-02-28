@@ -7,7 +7,6 @@ from unittest.mock import ANY, AsyncMock, MagicMock
 import pytest
 
 from amplifier_distro.server.apps.chat.connection import _STOP
-from amplifier_distro.server.protocol_adapters import web_chat_surface
 
 
 def make_ws(messages: list[dict]):

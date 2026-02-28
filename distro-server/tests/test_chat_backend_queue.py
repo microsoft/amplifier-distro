@@ -25,7 +25,7 @@ class TestMockBackendQueueIgnored:
 
 
 class TestFoundationBackendQueueWiring:
-    """FoundationBackend wires event_queue via _wire_event_queue."""
+    """FoundationBackend wires event hooks via _attach_surface when surface= given."""
 
     @pytest.fixture()
     def bare_backend(self) -> FoundationBackend:

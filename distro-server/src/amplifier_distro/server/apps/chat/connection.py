@@ -4,7 +4,7 @@ One instance per WebSocket connection. Owns:
   - _auth_handshake(): validate token if api_key is configured
   - _receive_loop(): read client messages, dispatch to backend
   - _event_fanout_loop(): drain asyncio.Queue, translate, send to WS
-  - event_queue: asyncio.Queue wired to FoundationBackend.on_stream
+  - event_queue: asyncio.Queue drained by _event_fanout_loop
 """
 
 from __future__ import annotations
