@@ -1393,3 +1393,34 @@ class TestSessionHandlePrewarmFields:
             bundle_version="1700000000.0",
         )
         assert handle.bundle_version == "1700000000.0"
+
+    async def test_create_session_stores_bundle_version_on_handle(
+        self, bridge_backend
+    ):
+        """create_session() stamps _bundle_version onto the new _SessionHandle.
+
+        When create_session() builds the _SessionHandle, it must pass
+        ``bundle_version=self._bundle_version`` so the handle carries the
+        version at the time the session was created (used later for staleness
+        detection).
+        """
+        mock_session = MagicMock()
+        mock_session.session_id = "sess-bv-001"
+
+        mock_prepared = MagicMock()
+        mock_prepared.create_session = AsyncMock(return_value=mock_session)
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+        bridge_backend._bundle_version = "mtime-99999.0"
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.create_session(bridge_backend, working_dir="/tmp")
+
+        assert bridge_backend._sessions["sess-bv-001"].bundle_version == "mtime-99999.0"
+
+        # Cleanup: cancel the worker task
+        if "sess-bv-001" in bridge_backend._worker_tasks:
+            task = bridge_backend._worker_tasks["sess-bv-001"]
+            task.cancel()
+            with pytest.raises((asyncio.CancelledError, Exception)):
+                await task

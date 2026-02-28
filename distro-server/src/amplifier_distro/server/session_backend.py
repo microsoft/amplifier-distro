@@ -58,6 +58,13 @@ class _SessionHandle:
     session: Any  # AmplifierSession from foundation
     _cleanup_done: bool = field(default=False, repr=False)
     prepared: Any = field(default=None, repr=False)
+    # Bundle version at session creation time (overlay bundle.yaml mtime).
+    # Stored for staleness detection — a mismatch means the bundle was reloaded
+    # while this session was running.
+    bundle_version: str = field(default="", repr=False)
+    # Surface reference for on_bundle_reload notification.
+    # Type is Any to avoid importing SessionSurface (fix/approval-display) here.
+    surface: Any = field(default=None, repr=False)
     hook_unregister: Callable[[], None] | None = field(default=None, repr=False)
 
     async def run(self, prompt: str) -> str:
@@ -627,6 +634,7 @@ class FoundationBackend:
             working_dir=wd,
             session=session,
             prepared=prepared,
+            bundle_version=self._bundle_version,
         )
         self._sessions[session_id] = handle
 
