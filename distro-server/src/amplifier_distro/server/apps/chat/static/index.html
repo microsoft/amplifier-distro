@@ -175,6 +175,12 @@
       gap: 8px;
       min-width: 0;
     }
+    .session-panel-header-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
     .session-panel-title-wrap {
       min-width: 0;
       display: inline-flex;
@@ -247,6 +253,29 @@
     .session-new-btn:hover {
       border-color: var(--accent-blue);
       color: var(--accent-blue);
+    }
+    .mobile-session-close {
+      display: none;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      touch-action: manipulation;
+    }
+    .mobile-session-close:hover {
+      border-color: var(--accent-blue);
+      color: var(--accent-blue);
+    }
+    .mobile-sidebar-backdrop {
+      display: none;
     }
     .session-filter-wrap {
       padding: 8px 10px;
@@ -967,6 +996,7 @@
         cursor: pointer;
         color: var(--text-secondary);
         font-size: 16px;
+        touch-action: manipulation;
       }
       #session-panel {
         position: fixed;
@@ -979,6 +1009,18 @@
       #session-panel.mobile-open {
         transform: translateX(0);
         box-shadow: 4px 0 20px rgba(0,0,0,0.5);
+      }
+      .mobile-session-close {
+        display: inline-flex;
+      }
+      .mobile-sidebar-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 150;
+        border: 0;
+        background: rgba(0, 0, 0, 0.45);
+        touch-action: manipulation;
       }
       .workspace-toggle { display: none !important; }
       .activity-panel { display: none !important; }
@@ -1980,6 +2022,7 @@
     const chronoItemsRef = useRef([]);
     const turnCountRef = useRef(0);
     const defaultCwdRef = useRef('~');
+    const draftCwdSyncKeyRef = useRef(null);
     const pendingEventsRef = useRef(new Map());
     const historyResumeTokenRef = useRef(0);
     const dragStateRef = useRef(null);
@@ -2086,10 +2129,31 @@
       const isDraft =
         active.source !== 'history'
         && (active.turnCount || 0) === 0;
-      if (!isDraft) return;
+      if (!isDraft) {
+        if (draftCwdSyncKeyRef.current === activeKey) {
+          draftCwdSyncKeyRef.current = null;
+        }
+        return;
+      }
+      if (draftCwdSyncKeyRef.current === activeKey) return;
       const nextCwd = active.cwd || cwd || '~';
+      draftCwdSyncKeyRef.current = activeKey;
+      defaultCwdRef.current = nextCwd;
       setDefaultCwd(nextCwd);
     }, [activeKey, sessions, cwd]);
+
+    useEffect(() => {
+      if (!mobileSidebarOpen) return;
+      const onKeyDown = (e) => {
+        if (e.key === 'Escape') {
+          setMobileSidebarOpen(false);
+        }
+      };
+      window.addEventListener('keydown', onKeyDown);
+      return () => {
+        window.removeEventListener('keydown', onKeyDown);
+      };
+    }, [mobileSidebarOpen]);
 
     // —— Index mapping ————————————————————————————————————————————
     function getLocalIndex(serverIndex) {
@@ -3638,54 +3702,11 @@
       refreshSessionFromDisk(activeKey, { notifyBottom: true, activeOnly: true });
     }, [activeKey, sessions, executing, refreshSessionFromDisk]);
 
-    const persistDefaultCwd = useCallback((value) => {
-      fetch('/apps/settings/distro-settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspace_root: value }),
-      })
-        .then(r => {
-          if (!r.ok && r.status !== 401) {
-            console.warn('[chat] failed to persist workspace_root', r.status);
-          }
-        })
-        .catch(err => {
-          console.warn('[chat] failed to persist workspace_root', err);
-        });
-    }, []);
-
     const applyDraftCwd = useCallback((rawCwd) => {
       const normalized = (rawCwd || '').trim() || '~';
       defaultCwdRef.current = normalized;
       setDefaultCwd(normalized);
-      setCwd(normalized);
-      persistDefaultCwd(normalized);
-
-      const key = activeKeyRef.current;
-      if (!key) return;
-
-      setSessions(prev => {
-        const next = new Map(prev);
-        const cur = next.get(key);
-        if (cur) next.set(key, { ...cur, cwd: normalized });
-        return next;
-      });
-
-      const active = sessions.get(key);
-      const isDraft =
-        !!active
-        && active.source !== 'history'
-        && (active.turnCount || 0) === 0
-        && !executing;
-      if (!isDraft) return;
-
-      const ws = wsRef.current;
-      if (ws?.readyState !== WebSocket.OPEN) return;
-
-      const payload = { type: 'create_session', cwd: normalized, bundle: null };
-      if (sessionId) payload.resume_session_id = sessionId;
-      ws.send(JSON.stringify(payload));
-    }, [sessions, sessionId, executing, persistDefaultCwd]);
+    }, []);
 
     const startPaneResize = useCallback((pane, e) => {
       if (typeof window !== 'undefined' && window.innerWidth <= 768) return;
@@ -3808,13 +3829,22 @@
       && activeSession.source !== 'history'
       && (activeSession.turnCount || 0) === 0
       && !executing;
+    const closeMobileSidebar = useCallback(() => {
+      setMobileSidebarOpen(false);
+    }, []);
 
     const mainFilter = viewMode === 'workspace' ? (i => i.type === 'text') : null;
     const activityFilter = viewMode === 'workspace' ? (i => i.type !== 'text') : null;
 
     return html`
       <div id="header">
-        <button class="hamburger" onClick=${() => setMobileSidebarOpen(o => !o)}>☰</button>
+        <button
+          class="hamburger"
+          aria-label=${mobileSidebarOpen ? 'Close sessions panel' : 'Open sessions panel'}
+          aria-controls="session-panel"
+          aria-expanded=${mobileSidebarOpen ? 'true' : 'false'}
+          onClick=${() => setMobileSidebarOpen(o => !o)}
+        >☰</button>
         <${StatusDot} status=${wsStatus} />
         <span class="app-name">Amplifier</span>
         <span class="header-spacer"></span>
@@ -3852,6 +3882,14 @@
       </div>
 
       <div id="app-body">
+        ${mobileSidebarOpen && showSessions && html`
+          <button
+            class="mobile-sidebar-backdrop"
+            aria-label="Close sessions panel"
+            onPointerDown=${closeMobileSidebar}
+            onClick=${closeMobileSidebar}
+          ></button>
+        `}
         <div
           id="session-panel"
           class=${(showSessions ? '' : 'hidden ') + (mobileSidebarOpen ? 'mobile-open ' : '') + (draggingPane === 'sessions' ? 'no-transition' : '')}
@@ -3862,7 +3900,15 @@
               <div class="session-panel-title-wrap">
                 <span>Sessions</span>
               </div>
-              <button class="session-new-btn" onClick=${newSession}>+ New</button>
+              <div class="session-panel-header-controls">
+                <button class="session-new-btn" onClick=${newSession}>+ New</button>
+                <button
+                  class="mobile-session-close"
+                  aria-label="Close sessions panel"
+                  onPointerDown=${closeMobileSidebar}
+                  onClick=${closeMobileSidebar}
+                >x</button>
+              </div>
             </div>
             <div class=${'session-panel-header-actions' + (showSyncButton ? ' has-sync' : '')}>
               <button
@@ -3968,7 +4014,10 @@
                         value=${defaultCwd}
                         placeholder="~/project/path"
                         spellcheck="false"
-                        onInput=${e => setDefaultCwd(e.target.value)}
+                        onInput=${e => {
+                          defaultCwdRef.current = e.target.value;
+                          setDefaultCwd(e.target.value);
+                        }}
                         onBlur=${e => applyDraftCwd(e.target.value)}
                       />
                     `
