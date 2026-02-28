@@ -147,31 +147,19 @@ name = "amplifier-distro"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "amplifier-foundation" },
     { name = "click" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
-    { name = "python-multipart" },
-    { name = "pyyaml" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-all = [
-    { name = "aiohttp" },
-    { name = "slack-bolt" },
-    { name = "slack-sdk" },
-]
-dev = [
-    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
-]
-slack = [
-    { name = "aiohttp" },
+    { name = "python-multipart" },
+    { name = "pyyaml" },
     { name = "slack-bolt" },
     { name = "slack-sdk" },
+    { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.dev-dependencies]
@@ -182,23 +170,23 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp", marker = "extra == 'slack'", specifier = ">=3.9.0" },
+    { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "amplifier-distro", extras = ["slack"], marker = "extra == 'all'" },
     { name = "amplifier-foundation", git = "https://github.com/microsoft/amplifier-foundation" },
     { name = "click", specifier = ">=8.0" },
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "httpx", specifier = ">=0.24.0" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
+    { name = "pytest", specifier = ">=7.0" },
+    { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "python-multipart", specifier = ">=0.0.6" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "slack-bolt", marker = "extra == 'slack'", specifier = ">=1.18.0" },
-    { name = "slack-sdk", marker = "extra == 'slack'", specifier = ">=3.26.0" },
+    { name = "slack-bolt", specifier = ">=1.18.0" },
+    { name = "slack-sdk", specifier = ">=3.26.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.20.0" },
 ]
-provides-extras = ["slack", "dev", "all"]
+provides-extras = ["all"]
 
 [package.metadata.requires-dev]
 dev = [

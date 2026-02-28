@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock
+
+import pytest
 
 # ── ApprovalSystem: auto-approve mode ──────────────────────────────────
 
@@ -182,3 +185,209 @@ class TestQueueDisplaySystem:
         d = QueueDisplaySystem(q)
         d2 = d.pop_nesting()
         assert d2.nesting_depth == 0
+
+
+# ── LogDisplaySystem ────────────────────────────────────────────────────────────
+
+
+class TestLogDisplaySystem:
+    async def test_show_message_info_routes_to_logger(
+        self, caplog: pytest.LogCaptureFixture
+    ):
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
+
+        display = LogDisplaySystem()
+        with caplog.at_level(logging.INFO, logger="amplifier_distro.display"):
+            await display.show_message("hello world", level="info", source="test-hook")
+        assert "hello world" in caplog.text
+
+    async def test_show_message_warning_routes_at_warning_level(
+        self, caplog: pytest.LogCaptureFixture
+    ):
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
+
+        display = LogDisplaySystem()
+        with caplog.at_level(logging.WARNING, logger="amplifier_distro.display"):
+            await display.show_message("uh oh", level="warning", source="test-hook")
+        assert "uh oh" in caplog.text
+
+    async def test_show_message_error_routes_at_error_level(
+        self, caplog: pytest.LogCaptureFixture
+    ):
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
+
+        display = LogDisplaySystem()
+        with caplog.at_level(logging.ERROR, logger="amplifier_distro.display"):
+            await display.show_message("kaboom", level="error", source="test-hook")
+        assert "kaboom" in caplog.text
+
+    def test_push_nesting_returns_self(self):
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
+
+        display = LogDisplaySystem()
+        assert display.push_nesting() is display
+
+    def test_pop_nesting_returns_self(self):
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
+
+        display = LogDisplaySystem()
+        assert display.pop_nesting() is display
+
+    def test_nesting_depth_is_zero(self):
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
+
+        display = LogDisplaySystem()
+        assert display.nesting_depth == 0
+
+
+# ── SessionSurface ────────────────────────────────────────────────────────────
+
+
+class TestSessionSurface:
+    def test_session_surface_defaults_all_none(self):
+        from amplifier_distro.server.protocol_adapters import SessionSurface
+
+        surface = SessionSurface()
+        assert surface.event_queue is None
+        assert surface.approval_system is None
+        assert surface.display_system is None
+        assert surface.on_bundle_reload is None
+
+    def test_session_surface_accepts_queue(self):
+        from amplifier_distro.server.protocol_adapters import SessionSurface
+
+        q: asyncio.Queue = asyncio.Queue()
+        surface = SessionSurface(event_queue=q)
+        assert surface.event_queue is q
+
+    def test_session_surface_accepts_all_fields(self):
+        from amplifier_distro.server.protocol_adapters import SessionSurface
+
+        q: asyncio.Queue = asyncio.Queue()
+        approval_sentinel = object()
+        display_sentinel = object()
+        reload_sentinel = object()
+        surface = SessionSurface(
+            event_queue=q,
+            approval_system=approval_sentinel,
+            display_system=display_sentinel,
+            on_bundle_reload=reload_sentinel,
+        )
+        assert surface.event_queue is q
+        assert surface.approval_system is approval_sentinel
+        assert surface.display_system is display_sentinel
+        assert surface.on_bundle_reload is reload_sentinel
+
+
+# ── headless_surface() ──────────────────────────────────────────────────────
+
+
+class TestHeadlessSurface:
+    def test_headless_surface_returns_session_surface(self):
+        from amplifier_distro.server.protocol_adapters import (
+            SessionSurface,
+            headless_surface,
+        )
+
+        assert isinstance(headless_surface(), SessionSurface)
+
+    def test_headless_surface_event_queue_is_none(self):
+        from amplifier_distro.server.protocol_adapters import headless_surface
+
+        surface = headless_surface()
+        assert surface.event_queue is None
+
+    def test_headless_surface_has_auto_approve_approval_system(self):
+        from amplifier_distro.server.protocol_adapters import (
+            ApprovalSystem,
+            headless_surface,
+        )
+
+        surface = headless_surface()
+        assert isinstance(surface.approval_system, ApprovalSystem)
+        assert surface.approval_system._auto_approve is True
+
+    def test_headless_surface_has_log_display_system(self):
+        from amplifier_distro.server.protocol_adapters import (
+            LogDisplaySystem,
+            headless_surface,
+        )
+
+        surface = headless_surface()
+        assert isinstance(surface.display_system, LogDisplaySystem)
+
+    def test_headless_surface_on_bundle_reload_is_none(self):
+        from amplifier_distro.server.protocol_adapters import headless_surface
+
+        surface = headless_surface()
+        assert surface.on_bundle_reload is None
+
+
+# ── web_chat_surface() ─────────────────────────────────────────────────────────
+
+
+class TestWebChatSurface:
+    def test_web_chat_surface_returns_session_surface(self):
+        from amplifier_distro.server.protocol_adapters import (
+            SessionSurface,
+            web_chat_surface,
+        )
+
+        q: asyncio.Queue = asyncio.Queue()
+        assert isinstance(web_chat_surface(q), SessionSurface)
+
+    def test_web_chat_surface_stores_queue(self):
+        from amplifier_distro.server.protocol_adapters import web_chat_surface
+
+        q: asyncio.Queue = asyncio.Queue()
+        surface = web_chat_surface(q)
+        assert surface.event_queue is q
+
+    def test_web_chat_surface_has_interactive_approval_system(self):
+        from amplifier_distro.server.protocol_adapters import (
+            ApprovalSystem,
+            web_chat_surface,
+        )
+
+        q: asyncio.Queue = asyncio.Queue()
+        surface = web_chat_surface(q)
+        assert isinstance(surface.approval_system, ApprovalSystem)
+        assert surface.approval_system._auto_approve is False
+
+    def test_web_chat_surface_has_queue_display_system(self):
+        from amplifier_distro.server.protocol_adapters import (
+            QueueDisplaySystem,
+            web_chat_surface,
+        )
+
+        q: asyncio.Queue = asyncio.Queue()
+        surface = web_chat_surface(q)
+        assert isinstance(surface.display_system, QueueDisplaySystem)
+
+    async def test_web_chat_surface_approval_request_pushes_to_queue(self):
+        from amplifier_distro.server.protocol_adapters import web_chat_surface
+
+        q: asyncio.Queue = asyncio.Queue()
+        surface = web_chat_surface(q)
+        # Simulate the approval system firing its internal queue-push callback
+        # directly — tests wiring without triggering a full request_approval round-trip
+        await surface.approval_system._on_approval_request(
+            "req-001", "Allow tool?", ["allow", "deny"], 300.0, "deny"
+        )
+        event_type, data = q.get_nowait()
+        assert event_type == "approval_request"
+        assert data["request_id"] == "req-001"
+        assert data["prompt"] == "Allow tool?"
+        # options/timeout/default checked in integration tests
+
+    async def test_web_chat_surface_display_pushes_to_queue(self):
+        from amplifier_distro.server.protocol_adapters import web_chat_surface
+
+        q: asyncio.Queue = asyncio.Queue()
+        surface = web_chat_surface(q)
+        await surface.display_system.show_message(
+            "Thinking…", level="info", source="hook"
+        )
+        event_type, data = q.get_nowait()
+        assert event_type == "display_message"
+        assert data["message"] == "Thinking…"

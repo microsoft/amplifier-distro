@@ -15,8 +15,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -24,6 +22,7 @@ from typing import Any, Protocol, runtime_checkable
 from amplifier_distro.conventions import AMPLIFIER_HOME, PROJECTS_DIR
 from amplifier_distro.features import AMPLIFIER_START_URI
 from amplifier_distro.metadata_persistence import register_metadata_hooks
+from amplifier_distro.server.protocol_adapters import SessionSurface
 from amplifier_distro.server.spawn_registration import register_spawning
 from amplifier_distro.transcript_persistence import register_transcript_hooks
 
@@ -58,7 +57,6 @@ class _SessionHandle:
     session: Any  # AmplifierSession from foundation
     _cleanup_done: bool = field(default=False, repr=False)
     prepared: Any = field(default=None, repr=False)
-    hook_unregister: Callable[[], None] | None = field(default=None, repr=False)
 
     async def run(self, prompt: str) -> str:
         """Execute a prompt and return the response text."""
@@ -89,10 +87,7 @@ class _SessionHandle:
         request_cancel = getattr(coordinator, "request_cancel", None)
         if request_cancel is not None:
             try:
-                if asyncio.iscoroutinefunction(request_cancel):
-                    await request_cancel(level)
-                else:
-                    request_cancel(level)
+                request_cancel(level)
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Error requesting cancel (level=%s)", level, exc_info=True
@@ -113,7 +108,7 @@ class SessionBackend(Protocol):
         working_dir: str = "~",
         bundle_name: str | None = None,
         description: str = "",
-        event_queue: asyncio.Queue | None = None,
+        surface: SessionSurface | None = None,
     ) -> SessionInfo:
         """Create a new Amplifier session. Returns session info."""
         ...
@@ -130,7 +125,7 @@ class SessionBackend(Protocol):
         self,
         session_id: str,
         working_dir: str,
-        event_queue: asyncio.Queue | None = None,
+        surface: SessionSurface | None = None,
     ) -> None:
         """Restore LLM transcript context for a previously created session."""
         ...
@@ -187,7 +182,7 @@ class MockBackend:
         working_dir: str = "~",
         bundle_name: str | None = None,
         description: str = "",
-        event_queue: Any = None,
+        surface: Any = None,
     ) -> SessionInfo:
         self._session_counter += 1
         session_id = f"mock-session-{self._session_counter:04d}"
@@ -255,7 +250,7 @@ class MockBackend:
         return self._message_history.get(session_id, [])
 
     async def resume_session(
-        self, session_id: str, working_dir: str, event_queue: Any = None
+        self, session_id: str, working_dir: str, surface: Any = None
     ) -> None:
         """No-op resume for testing. Records the call for assertion."""
         self.calls.append(
@@ -345,198 +340,180 @@ class FoundationBackend:
             bundle = await load_bundle(name)
         return await bundle.prepare()
 
-    def _wire_event_queue(
-        self, session: Any, session_id: str, event_queue: asyncio.Queue
-    ) -> Callable[[], None]:
-        """Wire streaming, display, and approval closures to an event queue.
+    def _attach_surface(
+        self, session: Any, session_id: str, surface: SessionSurface
+    ) -> None:
+        """Attach a SessionSurface to a session, wiring event hooks and systems.
 
-        Called from create_session() and resume_session() when event_queue
-        is provided. All three closures push (event_name, data) tuples
-        to the same queue.
-
-        Returns an unregister callable that removes all registered hooks and
-        removes the session from _wired_sessions, so the next call (on
-        reconnect) re-registers fresh hooks against the new queue.
-
-        Guards against double hook registration on page refresh / resume:
-        hooks are only registered once per session; subsequent calls update
-        only the approval system (which needs the new queue).
+        Handles both SessionSurface dataclass instances and dict-like surfaces
+        (used in testing).  Guards against double hook registration on page
+        refresh / resume: hooks are only registered once per session; subsequent
+        calls update only the display and approval systems.
         """
-        from amplifier_distro.server.protocol_adapters import (
-            ApprovalSystem,
-            QueueDisplaySystem,
-        )
+        from amplifier_distro.server.protocol_adapters import ApprovalSystem
 
-        _q = event_queue
+        # Support both SessionSurface objects and dict-like surfaces (tests).
+        if isinstance(surface, dict):
+            event_queue = surface.get("event_queue")
+            display_system = surface.get("display_system")
+            approval_system = surface.get("approval_system")
+        else:
+            event_queue = surface.event_queue
+            display_system = surface.display_system
+            approval_system = surface.approval_system
+
         coordinator = session.coordinator
 
-        if session_id in self._wired_sessions:
-            # Already wired — update approval system only (new queue connection).
-            # Don't re-register hooks; return the existing unregister callable
-            # so the caller can still clean up when it's done.
-            def _on_approval_request_rewire(
-                request_id: str,
-                prompt: str,
-                options: list[str],
-                timeout: float,
-                default: str,
-            ) -> None:
+        if event_queue is not None:
+            _q = event_queue
+
+            if session_id in self._wired_sessions:
+                # Already wired — update approval/display systems only.
+                # Don't re-register hooks.
+                if display_system is not None and hasattr(coordinator, "set"):
+                    coordinator.set("display", display_system)
+                if approval_system is None:
+                    # Create a fresh approval for the new queue connection.
+                    def _on_approval_request_rewire(
+                        request_id: str,
+                        prompt: str,
+                        options: list[str],
+                        timeout: float,
+                        default: str,
+                    ) -> None:
+                        try:
+                            _q.put_nowait(
+                                (
+                                    "approval_request",
+                                    {
+                                        "request_id": request_id,
+                                        "prompt": prompt,
+                                        "options": options,
+                                        "timeout": timeout,
+                                        "default": default,
+                                    },
+                                )
+                            )
+                        except asyncio.QueueFull:
+                            logger.warning(
+                                "Event queue full, dropping approval_request"
+                            )
+
+                    approval_system = ApprovalSystem(
+                        on_approval_request=_on_approval_request_rewire,
+                        auto_approve=False,
+                    )
+                if hasattr(coordinator, "set"):
+                    coordinator.set("approval", approval_system)
+                self._approval_systems[session_id] = approval_system
+                return
+
+            self._wired_sessions.add(session_id)
+
+            # 1. Streaming hook — all coordinator events to queue.
+            from amplifier_core.events import ALL_EVENTS
+            from amplifier_core.models import HookResult
+
+            async def on_stream(event: str, data: dict) -> HookResult:
                 try:
-                    _q.put_nowait(
-                        (
-                            "approval_request",
-                            {
-                                "request_id": request_id,
-                                "prompt": prompt,
-                                "options": options,
-                                "timeout": timeout,
-                                "default": default,
-                            },
-                        )
-                    )
+                    _q.put_nowait((event, data))
                 except asyncio.QueueFull:
-                    logger.warning("Event queue full, dropping approval_request")
+                    logger.warning("Event queue full, dropping event: %s", event)
+                return HookResult(action="continue", data=data)
 
-            approval = ApprovalSystem(
-                on_approval_request=_on_approval_request_rewire,
-                auto_approve=False,
-            )
-            if hasattr(coordinator, "set"):
-                coordinator.set("approval", approval)
-            self._approval_systems[session_id] = approval
-            existing = self._sessions.get(session_id)
-            if existing and existing.hook_unregister:
-                return existing.hook_unregister
-            return lambda: None
+            hooks = coordinator.hooks
 
-        self._wired_sessions.add(session_id)
+            registered = 0
+            failed_evts = []
+            for evt in ALL_EVENTS:
+                try:
+                    hooks.register(evt, on_stream)
+                    registered += 1
+                except Exception as exc:  # noqa: BLE001
+                    failed_evts.append((evt, exc))
 
-        # 1. Streaming hook — all coordinator events to queue.
-        # The hooks API requires an async handler returning HookResult.
-        # There is no wildcard support — register for each event explicitly.
-        from amplifier_core.events import ALL_EVENTS
-        from amplifier_core.models import HookResult
+            # Delegate events are not in ALL_EVENTS — register explicitly.
+            for evt in [
+                "delegate:agent_spawned",
+                "delegate:agent_resumed",
+                "delegate:agent_completed",
+                "delegate:error",
+            ]:
+                try:
+                    hooks.register(evt, on_stream)
+                    registered += 1
+                except Exception as exc:  # noqa: BLE001
+                    failed_evts.append((evt, exc))
 
-        async def on_stream(event: str, data: dict) -> HookResult:
-            try:
-                _q.put_nowait((event, data))
-            except asyncio.QueueFull:
-                logger.warning("Event queue full, dropping event: %s", event)
-            return HookResult(action="continue", data=data)
-
-        hooks = coordinator.hooks
-        _registered_hooks: list[tuple[str, Any]] = []
-
-        registered = 0
-        failed_evts = []
-        for evt in ALL_EVENTS:
-            try:
-                hooks.register(evt, on_stream)
-                _registered_hooks.append((evt, on_stream))
-                registered += 1
-            except Exception as exc:  # noqa: BLE001
-                failed_evts.append((evt, exc))
-
-        # Delegate events are not in ALL_EVENTS — register explicitly
-        for evt in [
-            "delegate:agent_spawned",
-            "delegate:agent_resumed",
-            "delegate:agent_completed",
-            "delegate:error",
-        ]:
-            try:
-                hooks.register(evt, on_stream)
-                _registered_hooks.append((evt, on_stream))
-                registered += 1
-            except Exception as exc:  # noqa: BLE001
-                failed_evts.append((evt, exc))
-
-        # Bridge hook — re-emit orchestrator:complete as prompt:complete.
-        # hooks-session-naming (and any foundation hook) listens to
-        # prompt:complete, but loop-streaming emits orchestrator:complete.
-        # Inject session_id since it's absent from the orchestrator event data.
-        async def on_orchestrator_complete(event: str, data: dict) -> HookResult:
-            await coordinator.hooks.emit(
-                "prompt:complete", {**data, "session_id": session_id}
-            )
-            return HookResult(action="continue", data=data)
-
-        try:
-            hooks.register(
-                "orchestrator:complete", on_orchestrator_complete, priority=50
-            )
-            _registered_hooks.append(
-                ("orchestrator:complete", on_orchestrator_complete)
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to register prompt:complete bridge: %s", exc)
-
-        logger.info(
-            "Event hook wiring: %d registered, %d failed for session %s",
-            registered,
-            len(failed_evts),
-            session_id,
-        )
-        if failed_evts:
-            for evt, exc in failed_evts:
-                logger.warning("  hook registration failed [%s]: %s", evt, exc)
-
-        # 2. Display system — display messages to queue
-        display = QueueDisplaySystem(event_queue)
-        if hasattr(coordinator, "set"):
-            coordinator.set("display", display)
-
-        # 3. Approval system — approval requests to queue
-        def _on_approval_request(
-            request_id: str,
-            prompt: str,
-            options: list[str],
-            timeout: float,
-            default: str,
-        ) -> None:
-            try:
-                _q.put_nowait(
-                    (
-                        "approval_request",
-                        {
-                            "request_id": request_id,
-                            "prompt": prompt,
-                            "options": options,
-                            "timeout": timeout,
-                            "default": default,
-                        },
-                    )
+            # Bridge hook — re-emit orchestrator:complete as prompt:complete.
+            async def on_orchestrator_complete(event: str, data: dict) -> HookResult:
+                await coordinator.hooks.emit(
+                    "prompt:complete", {**data, "session_id": session_id}
                 )
-            except asyncio.QueueFull:
-                logger.warning("Event queue full, dropping approval_request")
+                return HookResult(action="continue", data=data)
 
-        approval = ApprovalSystem(
-            on_approval_request=_on_approval_request,
-            auto_approve=False,
-        )
-        if hasattr(coordinator, "set"):
-            coordinator.set("approval", approval)
-        self._approval_systems[session_id] = approval
+            try:
+                hooks.register(
+                    "orchestrator:complete", on_orchestrator_complete, priority=50
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to register prompt:complete bridge: %s", exc)
 
-        # Build and return the unregister callable.  Calling it removes all
-        # registered hooks from the coordinator and evicts the session from
-        # _wired_sessions so the next _wire_event_queue call re-registers
-        # fresh hooks against the new queue (critical for correct reconnect).
-        def _unregister() -> None:
-            for evt, fn in _registered_hooks:
-                with contextlib.suppress(Exception):
-                    hooks.unregister(evt, fn)
-            self._wired_sessions.discard(session_id)
+            logger.info(
+                "Event hook wiring: %d registered, %d failed for session %s",
+                registered,
+                len(failed_evts),
+                session_id,
+            )
+            if failed_evts:
+                for evt, exc in failed_evts:
+                    logger.warning("  hook registration failed [%s]: %s", evt, exc)
 
-        return _unregister
+            # Create approval from queue when surface doesn't supply one.
+            if approval_system is None:
+
+                def _on_approval_request(
+                    request_id: str,
+                    prompt: str,
+                    options: list[str],
+                    timeout: float,
+                    default: str,
+                ) -> None:
+                    try:
+                        _q.put_nowait(
+                            (
+                                "approval_request",
+                                {
+                                    "request_id": request_id,
+                                    "prompt": prompt,
+                                    "options": options,
+                                    "timeout": timeout,
+                                    "default": default,
+                                },
+                            )
+                        )
+                    except asyncio.QueueFull:
+                        logger.warning("Event queue full, dropping approval_request")
+
+                approval_system = ApprovalSystem(
+                    on_approval_request=_on_approval_request,
+                    auto_approve=False,
+                )
+
+        # Unconditionally set display_system and store approval_system.
+        if display_system is not None and hasattr(coordinator, "set"):
+            coordinator.set("display", display_system)
+        if approval_system is not None:
+            if hasattr(coordinator, "set"):
+                coordinator.set("approval", approval_system)
+            self._approval_systems[session_id] = approval_system
 
     async def create_session(
         self,
         working_dir: str = "~",
         bundle_name: str | None = None,
         description: str = "",
-        event_queue: asyncio.Queue | None = None,
-        exclude_tools: list[str] | None = None,
+        surface: SessionSurface | None = None,
     ) -> SessionInfo:
         wd = Path(working_dir).expanduser()
 
@@ -584,14 +561,16 @@ class FoundationBackend:
             },
         )
 
-        # Wire streaming/display/approval when event_queue provided
-        if event_queue is not None:
-            handle.hook_unregister = self._wire_event_queue(
-                session, session_id, event_queue
-            )
+        # Attach surface (event queue, display, approval) to the session.
+        from amplifier_distro.server.protocol_adapters import (
+            headless_surface as _headless_surface,
+        )
+
+        _surface = surface if surface is not None else _headless_surface()
+        self._attach_surface(session, session_id, _surface)
 
         # Register session spawning capability
-        register_spawning(session, prepared, session_id, exclude_tools=exclude_tools)
+        register_spawning(session, prepared, session_id)
 
         # Pre-start the session worker so the first message doesn't pay
         # the task-creation overhead
@@ -737,13 +716,6 @@ class FoundationBackend:
 
             # 3. Create a fresh session with the same bundle
             wd = Path(working_dir).expanduser()
-            # CWD safety guard: BundleRegistry.__init__ calls os.getcwd() which
-            # raises FileNotFoundError if the process CWD was deleted (e.g. in
-            # container or temp-dir environments). Silently recover by moving to ~.
-            try:
-                os.getcwd()
-            except FileNotFoundError:
-                os.chdir(os.path.expanduser("~"))
             prepared = await self._load_bundle()
             session = await prepared.create_session(
                 session_id=session_id,
@@ -939,16 +911,6 @@ class FoundationBackend:
             working_dir=str(handle.working_dir),
         )
 
-    def get_hook_unregister(self, session_id: str) -> Callable[[], None] | None:
-        """Return the hook unregister callable for a session, if one was wired.
-
-        Called by VoiceConnection.create() so it can store the callable and
-        invoke it in _cleanup_hook() on disconnect, ensuring hooks are properly
-        removed before the next reconnect re-registers fresh ones.
-        """
-        handle = self._sessions.get(session_id)
-        return handle.hook_unregister if handle else None
-
     def get_session_config(self, session_id: str) -> dict[str, Any] | None:
         """Return the mount-plan config dict for a live session."""
         handle = self._sessions.get(session_id)
@@ -970,21 +932,19 @@ class FoundationBackend:
         self,
         session_id: str,
         working_dir: str,
-        event_queue: asyncio.Queue | None = None,
+        surface: SessionSurface | None = None,
     ) -> None:
         """Restore the LLM context for a session after a server restart."""
-        if event_queue is not None:
+        if surface is not None:
             self._ended_sessions.discard(session_id)
 
         if self._sessions.get(session_id) is None:
             await self._reconnect(session_id, working_dir=working_dir)
 
-        if event_queue is not None:
+        if surface is not None:
             handle = self._sessions.get(session_id)
             if handle is not None:
-                handle.hook_unregister = self._wire_event_queue(
-                    handle.session, session_id, event_queue
-                )
+                self._attach_surface(handle.session, session_id, surface)
 
             # Ensure worker queue + task exist after resume
             if session_id not in self._session_queues:
