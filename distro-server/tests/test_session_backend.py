@@ -1305,6 +1305,7 @@ class TestFoundationBackendComputeBundleVersion:
 
     def test_returns_empty_string_when_no_overlay(self, bridge_backend):
         """Returns '' when overlay does not exist."""
+        # overlay_dir is not patched — function must short-circuit before calling it
         with patch("amplifier_distro.overlay.overlay_exists", return_value=False):
             from amplifier_distro.server.session_backend import FoundationBackend
 
@@ -1328,8 +1329,8 @@ class TestFoundationBackendComputeBundleVersion:
             version = FoundationBackend._compute_bundle_version(bridge_backend)
 
         expected = str(bundle_yaml.stat().st_mtime)
-        assert version == expected
         assert version != ""
+        assert version == expected
 
     def test_returns_empty_string_when_overlay_dir_exists_but_bundle_yaml_missing(
         self, bridge_backend, tmp_path
