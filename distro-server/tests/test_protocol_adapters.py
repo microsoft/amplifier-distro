@@ -238,3 +238,42 @@ class TestLogDisplaySystem:
 
         display = LogDisplaySystem()
         assert display.nesting_depth == 0
+
+
+# ── SessionSurface ────────────────────────────────────────────────────────────
+
+
+class TestSessionSurface:
+    def test_session_surface_defaults_all_none(self):
+        from amplifier_distro.server.protocol_adapters import SessionSurface
+
+        surface = SessionSurface()
+        assert surface.event_queue is None
+        assert surface.approval_system is None
+        assert surface.display_system is None
+        assert surface.on_bundle_reload is None
+
+    def test_session_surface_accepts_queue(self):
+        from amplifier_distro.server.protocol_adapters import SessionSurface
+
+        q: asyncio.Queue = asyncio.Queue()
+        surface = SessionSurface(event_queue=q)
+        assert surface.event_queue is q
+
+    def test_session_surface_accepts_all_fields(self):
+        from amplifier_distro.server.protocol_adapters import SessionSurface
+
+        q: asyncio.Queue = asyncio.Queue()
+        approval_sentinel = object()
+        display_sentinel = object()
+        reload_sentinel = object()
+        surface = SessionSurface(
+            event_queue=q,
+            approval_system=approval_sentinel,
+            display_system=display_sentinel,
+            on_bundle_reload=reload_sentinel,
+        )
+        assert surface.event_queue is q
+        assert surface.approval_system is approval_sentinel
+        assert surface.display_system is display_sentinel
+        assert surface.on_bundle_reload is reload_sentinel
