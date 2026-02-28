@@ -1242,16 +1242,26 @@ class TestFoundationBackendReloadBundle:
         handle = _make_mock_handle("sess-no-surf")
         handle.surface = None
 
-        bridge_backend._sessions = {"sess-no-surf": handle}
+        on_reload_b = AsyncMock()
+        handle_b = _make_mock_handle("sess-no-surf-b")
+        handle_b.surface = MagicMock()
+        handle_b.surface.on_bundle_reload = on_reload_b
+
+        bridge_backend._sessions = {
+            "sess-no-surf": handle,
+            "sess-no-surf-b": handle_b,
+        }
 
         from amplifier_distro.server.session_backend import FoundationBackend
 
         await FoundationBackend.reload_bundle(bridge_backend)  # must not raise
 
+        on_reload_b.assert_awaited_once()
+
     async def test_reload_bundle_skips_surfaces_with_no_on_bundle_reload(
         self, bridge_backend
     ):
-        """reload_bundle() skips surfaces that have on_bundle_reload = None — must not raise."""
+        """reload_bundle() skips surfaces with on_bundle_reload = None — must not raise."""
         new_bundle = MagicMock(name="new_bundle")
         bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
         bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
@@ -1260,11 +1270,21 @@ class TestFoundationBackendReloadBundle:
         handle.surface = MagicMock()
         handle.surface.on_bundle_reload = None
 
-        bridge_backend._sessions = {"sess-no-callback": handle}
+        on_reload_b = AsyncMock()
+        handle_b = _make_mock_handle("sess-no-callback-b")
+        handle_b.surface = MagicMock()
+        handle_b.surface.on_bundle_reload = on_reload_b
+
+        bridge_backend._sessions = {
+            "sess-no-callback": handle,
+            "sess-no-callback-b": handle_b,
+        }
 
         from amplifier_distro.server.session_backend import FoundationBackend
 
         await FoundationBackend.reload_bundle(bridge_backend)  # must not raise
+
+        on_reload_b.assert_awaited_once()
 
     async def test_reload_bundle_continues_past_surface_error(
         self, bridge_backend
