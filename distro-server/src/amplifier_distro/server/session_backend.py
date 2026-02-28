@@ -365,7 +365,7 @@ class FoundationBackend:
         logger.info("Bundle pre-warmed and ready")
 
     def _compute_bundle_version(self) -> str:
-        """Return a version string based on overlay file mtime. Stub — see Task 9."""
+        """Return a version string based on overlay file mtime. Stub — see Task 10."""
         return ""
 
     def _wire_event_queue(
