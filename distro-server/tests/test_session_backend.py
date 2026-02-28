@@ -952,3 +952,141 @@ class TestMockBackendNewMethods:
         q: asyncio.Queue = asyncio.Queue()
         await backend.resume_session("s", "~", event_queue=q)
         assert any(c["method"] == "resume_session" for c in backend.calls)
+
+
+# ── Surface helpers ───────────────────────────────────────────────────────────
+
+
+def headless_surface():
+    """Minimal headless surface descriptor for tests.
+
+    In the real implementation this will be a dataclass / named object.
+    For now it only needs to be distinguishable from None and from a
+    web-chat surface so the backend can dispatch on type.
+    """
+    return {"type": "headless"}
+
+
+def web_chat_surface(event_queue: asyncio.Queue) -> dict:
+    """Minimal web-chat surface descriptor for tests.
+
+    Carries the asyncio.Queue that streaming events should be pushed onto.
+    """
+    return {"type": "web_chat", "event_queue": event_queue}
+
+
+# ── TestCreateSessionSurface ──────────────────────────────────────────────────
+
+
+class TestCreateSessionSurface:
+    """create_session(surface=...) must be accepted and dispatch correctly.
+
+    These tests are the RED phase: they will all fail with
+    TypeError until create_session() is extended to accept the
+    surface= keyword argument.
+    """
+
+    async def test_create_session_accepts_surface_parameter(self, bridge_backend):
+        """create_session() must accept a surface= keyword argument.
+
+        Passes surface=headless_surface() and expects the returned
+        SessionInfo to carry the session_id created by the mock session.
+        """
+        mock_session = MagicMock()
+        mock_session.session_id = "sess-surface-001"
+        mock_session.project_id = "test-project"
+        mock_session.coordinator = MagicMock()
+
+        mock_prepared = MagicMock()
+        mock_prepared.create_session = AsyncMock(return_value=mock_session)
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        with (
+            patch("asyncio.create_task") as mock_create_task,
+            patch("amplifier_distro.server.session_backend.register_transcript_hooks"),
+            patch("amplifier_distro.server.session_backend.register_metadata_hooks"),
+            patch("amplifier_distro.server.session_backend.register_spawning"),
+        ):
+            mock_create_task.return_value = MagicMock()
+            info = await FoundationBackend.create_session(
+                bridge_backend,
+                working_dir="/tmp",
+                surface=headless_surface(),
+            )
+
+        assert info.session_id == "sess-surface-001"
+
+    async def test_create_session_surface_none_uses_headless_defaults(
+        self, bridge_backend
+    ):
+        """surface=None must use headless defaults and register an approval system.
+
+        The headless approval system enables auto-approve behaviour so
+        that CLI / non-interactive callers work without an event queue.
+        """
+        mock_session = MagicMock()
+        mock_session.session_id = "sess-headless-001"
+        mock_session.project_id = "test-project"
+        mock_session.coordinator = MagicMock()
+
+        mock_prepared = MagicMock()
+        mock_prepared.create_session = AsyncMock(return_value=mock_session)
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        with (
+            patch("asyncio.create_task") as mock_create_task,
+            patch("amplifier_distro.server.session_backend.register_transcript_hooks"),
+            patch("amplifier_distro.server.session_backend.register_metadata_hooks"),
+            patch("amplifier_distro.server.session_backend.register_spawning"),
+        ):
+            mock_create_task.return_value = MagicMock()
+            info = await FoundationBackend.create_session(
+                bridge_backend,
+                working_dir="/tmp",
+                surface=None,
+            )
+
+        assert info.session_id == "sess-headless-001"
+        assert "sess-headless-001" in bridge_backend._approval_systems
+
+    async def test_create_session_with_web_chat_surface_stores_approval(
+        self, bridge_backend
+    ):
+        """surface=web_chat_surface(q) must store an ApprovalSystem for that session.
+
+        The web-chat surface carries the event queue used for streaming;
+        the backend must wire the approval system so that UI approval
+        requests can be resolved via resolve_approval().
+        """
+        mock_session = MagicMock()
+        mock_session.session_id = "sess-webchat-001"
+        mock_session.project_id = "test-project"
+        mock_session.coordinator = MagicMock()
+        mock_session.coordinator.hooks = MagicMock()
+
+        mock_prepared = MagicMock()
+        mock_prepared.create_session = AsyncMock(return_value=mock_session)
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+
+        q: asyncio.Queue = asyncio.Queue()
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        with (
+            patch("asyncio.create_task") as mock_create_task,
+            patch("amplifier_distro.server.session_backend.register_transcript_hooks"),
+            patch("amplifier_distro.server.session_backend.register_metadata_hooks"),
+            patch("amplifier_distro.server.session_backend.register_spawning"),
+        ):
+            mock_create_task.return_value = MagicMock()
+            await FoundationBackend.create_session(
+                bridge_backend,
+                working_dir="/tmp",
+                surface=web_chat_surface(q),
+            )
+
+        assert "sess-webchat-001" in bridge_backend._approval_systems
