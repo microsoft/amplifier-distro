@@ -360,9 +360,15 @@ class FoundationBackend:
         all subsequent calls.
         """
         logger.info("Pre-warming bundle...")
-        self._prepared_bundle = await self._load_bundle()
-        self._bundle_version = self._compute_bundle_version()
-        logger.info("Bundle pre-warmed and ready")
+        try:
+            self._prepared_bundle = await self._load_bundle()
+            self._bundle_version = self._compute_bundle_version()
+            logger.info("Bundle pre-warmed and ready")
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Bundle pre-warm failed — server will retry on first session request",
+                exc_info=True,
+            )
 
     def _compute_bundle_version(self) -> str:
         """Return a version string based on overlay file mtime. Stub — see Task 10."""

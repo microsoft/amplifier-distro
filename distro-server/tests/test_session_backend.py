@@ -1086,6 +1086,24 @@ class TestFoundationBackendStartup:
 
         assert bridge_backend._bundle_version == "1234567.89"
 
+    async def test_startup_logs_warning_and_continues_on_load_failure(
+        self, bridge_backend
+    ):
+        """startup() must log a warning and not re-raise if _load_bundle() fails.
+
+        The server should start in a degraded-but-running state; the first
+        create_session() call will retry the load.  _prepared_bundle stays None.
+        """
+        bridge_backend._load_bundle = AsyncMock(side_effect=RuntimeError("load failed"))
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        # Must not raise — warn-and-continue semantics
+        await FoundationBackend.startup(bridge_backend)
+
+        # Cache stays unpopulated — create_session() will retry
+        assert bridge_backend._prepared_bundle is None
+
 
 class TestMockBackendNewMethods:
     async def test_create_session_accepts_event_queue(self):
