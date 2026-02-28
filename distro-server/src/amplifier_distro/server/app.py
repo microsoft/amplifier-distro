@@ -109,9 +109,10 @@ class DistroServer:
         self._setup_bridge_routes()
         self._setup_memory_routes()
         self._setup_root()
-        # Register graceful backend shutdown
-        from amplifier_distro.server.services import stop_services
+        # Pre-warm the bundle at server startup
+        from amplifier_distro.server.services import start_services, stop_services
 
+        self._app.add_event_handler("startup", start_services)
         self._app.add_event_handler("shutdown", stop_services)
         self._app.include_router(self._core_router)
 

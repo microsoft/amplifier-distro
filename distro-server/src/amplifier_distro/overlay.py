@@ -15,6 +15,7 @@ include resolution and composition automatically.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,10 @@ from .conventions import DISTRO_OVERLAY_DIR
 from .features import AMPLIFIER_START_URI, Provider, provider_bundle_uri
 
 logger = logging.getLogger(__name__)
+
+# Holds strong references to fire-and-forget reload tasks so they are not
+# garbage-collected before they complete (satisfies RUF006).
+_reload_tasks: set[asyncio.Task[None]] = set()
 
 # Kept here ONLY for migration — it is never added to new overlays.
 _STALE_SESSION_NAMING_URI = (
@@ -67,6 +72,26 @@ def _write_overlay(data: dict[str, Any]) -> Path:
     path = overlay_bundle_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+
+    # Trigger live bundle reload if the server is running.
+    # Uses get_running_loop() so this is a no-op when called from the CLI / wizard
+    # (no event loop running) and silently skips when services aren't initialized.
+    try:
+        from amplifier_distro.server.services import get_services
+
+        services = get_services()
+        reload_bundle = getattr(services.backend, "reload_bundle", None)
+        if reload_bundle is not None:
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(reload_bundle())
+            _reload_tasks.add(task)
+            task.add_done_callback(_reload_tasks.discard)
+    except RuntimeError:
+        # RuntimeError covers both "services not initialized" (from get_services())
+        # and "no running event loop" (from get_running_loop()) — both are expected
+        # in non-server contexts and can be safely ignored.
+        pass
+
     return path
 
 

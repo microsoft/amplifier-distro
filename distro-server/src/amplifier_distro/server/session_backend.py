@@ -58,6 +58,13 @@ class _SessionHandle:
     session: Any  # AmplifierSession from foundation
     _cleanup_done: bool = field(default=False, repr=False)
     prepared: Any = field(default=None, repr=False)
+    # Bundle version at session creation time (overlay bundle.yaml mtime).
+    # Stored for staleness detection — a mismatch means the bundle was reloaded
+    # while this session was running.
+    bundle_version: str = field(default="", repr=False)
+    # Surface reference for on_bundle_reload notification.
+    # Type is Any to avoid importing SessionSurface (fix/approval-display) here.
+    surface: Any = field(default=None, repr=False)
     hook_unregister: Callable[[], None] | None = field(default=None, repr=False)
 
     async def run(self, prompt: str) -> str:
@@ -325,15 +332,23 @@ class FoundationBackend:
         # Guard: sessions whose hooks have already been wired (prevents
         # double-registration on page refresh / resume)
         self._wired_sessions: set[str] = set()
+        self._prepared_bundle: Any | None = None  # Pre-warmed bundle cache
+        self._bundle_version: str = ""  # Version string for staleness detection
 
     async def _load_bundle(self, bundle_name: str | None = None) -> Any:
         """Load and prepare a bundle via foundation.
+
+        If _prepared_bundle is already set (pre-warmed by startup()), returns the
+        cached value immediately without any I/O.
 
         If a local overlay bundle exists (created by the install wizard),
         loads it by path.  The overlay includes the maintained distro bundle and any
         user-selected features, so everything composes automatically.
         Falls back to loading the bundle by name if no overlay exists.
         """
+        if self._prepared_bundle is not None:
+            return self._prepared_bundle
+
         from amplifier_foundation import load_bundle
 
         from amplifier_distro.overlay import overlay_dir, overlay_exists
@@ -344,6 +359,71 @@ class FoundationBackend:
             name = bundle_name or self._bundle_name
             bundle = await load_bundle(name)
         return await bundle.prepare()
+
+    async def startup(self) -> None:
+        """Pre-warm the bundle at server startup so first create_session() is instant.
+        Called by FastAPI's startup event handler (wired in app.py).
+        Sets self._prepared_bundle so _load_bundle() returns the cached value on
+        all subsequent calls.
+        """
+        logger.info("Pre-warming bundle...")
+        try:
+            self._prepared_bundle = await self._load_bundle()
+            self._bundle_version = self._compute_bundle_version()
+            logger.info("Bundle pre-warmed and ready")
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Bundle pre-warm failed — server will retry on first session request",
+                exc_info=True,
+            )
+
+    async def reload_bundle(self) -> None:
+        """Invalidate the bundle cache and reload from scratch.
+        Called after overlay writes so a server restart isn't needed.
+        After reloading, notifies all active sessions via their surface's
+        on_bundle_reload callback (each surface defines its own restart policy).
+        """
+        logger.info("Reloading bundle...")
+        self._prepared_bundle = None  # Invalidate cache so _load_bundle() does real I/O
+        self._prepared_bundle = await self._load_bundle()
+        self._bundle_version = self._compute_bundle_version()
+        logger.info("Bundle reloaded")
+
+        # Notify all active sessions via their surface's on_bundle_reload callback.
+        # Each surface defines its own restart policy (web chat, Slack, headless).
+        # Use getattr(..., None) so this works before fix/approval-display lands
+        # (handles that predate SessionSurface have no surface attribute).
+        for session_id, handle in list(self._sessions.items()):
+            surface = getattr(handle, "surface", None)
+            if surface is None:
+                continue
+            on_reload = getattr(surface, "on_bundle_reload", None)
+            if on_reload is None:
+                continue
+            try:
+                await on_reload()
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Error calling on_bundle_reload for session %s",
+                    session_id,
+                    exc_info=True,
+                )
+
+    def _compute_bundle_version(self) -> str:
+        """Return a version string based on overlay bundle.yaml mtime.
+
+        Uses the modification time of bundle.yaml as a cheap staleness signal.
+        Sessions store this at creation time so they can detect a bundle upgrade.
+        Returns '' if no overlay exists or bundle.yaml is absent.
+        """
+        from amplifier_distro.overlay import overlay_dir, overlay_exists
+
+        if not overlay_exists():
+            return ""
+        path = overlay_dir() / "bundle.yaml"
+        if not path.exists():
+            return ""
+        return str(path.stat().st_mtime)
 
     def _wire_event_queue(
         self, session: Any, session_id: str, event_queue: asyncio.Queue
@@ -554,6 +634,7 @@ class FoundationBackend:
             working_dir=wd,
             session=session,
             prepared=prepared,
+            bundle_version=self._bundle_version,
         )
         self._sessions[session_id] = handle
 

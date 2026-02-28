@@ -53,6 +53,7 @@ class TestDisplayMessageQueueWiring:
         backend._ended_sessions = set()
         backend._wired_sessions = set()
         backend._approval_systems = {}
+        backend._bundle_version = ""
 
         q: asyncio.Queue = asyncio.Queue()
 
@@ -88,6 +89,7 @@ class TestDisplayMessageQueueWiring:
         backend._ended_sessions = set()
         backend._wired_sessions = set()
         backend._approval_systems = {}
+        backend._bundle_version = ""
 
         with patch("asyncio.create_task"):
             await backend.create_session(working_dir="~")  # no event_queue
