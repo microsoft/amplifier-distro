@@ -134,17 +134,19 @@ def service_status() -> ServiceResult:
 
 
 def _find_distro_binary() -> str | None:
-    """Find the amp-distro binary.
+    """Find the amp-distro binary, preferring the currently-running binary.
 
-    Checks sys.argv[0] first (works when invoked as an installed script),
-    then falls back to shutil.which for PATH lookup.
+    Resolution order:
+    1. Path(sys.argv[0]).resolve() — the binary currently running this command.
+       More reliable than PATH lookup in multi-venv environments.
+    2. shutil.which("amp-distro") — fallback for PATH-based lookup.
 
     Returns:
-        Absolute path to the amp-distro binary, or None if not found.
+        Absolute path string, or None if not found.
     """
-    argv0 = Path(sys.argv[0])
-    if argv0.exists():
-        return str(argv0.resolve())
+    candidate = Path(sys.argv[0]).resolve()
+    if candidate.exists():
+        return str(candidate)
     return shutil.which("amp-distro")
 
 
