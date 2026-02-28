@@ -8,6 +8,7 @@ Tests cover:
 5. Watchdog CLI subcommands (mocked)
 """
 
+import contextlib
 import os
 import urllib.error
 from pathlib import Path
@@ -177,10 +178,8 @@ class TestWatchdogLoop:
 
         from amplifier_distro.server.watchdog import run_watchdog_loop
 
-        try:
+        with contextlib.suppress(KeyboardInterrupt):
             run_watchdog_loop(check_interval=1, restart_after=300, max_restarts=5)
-        except KeyboardInterrupt:
-            pass
 
         mock_restart.assert_not_called()
 
@@ -233,10 +232,8 @@ class TestWatchdogLoop:
 
         from amplifier_distro.server.watchdog import run_watchdog_loop
 
-        try:
+        with contextlib.suppress(KeyboardInterrupt):
             run_watchdog_loop(check_interval=1, restart_after=300, max_restarts=5)
-        except KeyboardInterrupt:
-            pass
 
         mock_restart.assert_not_called()
 
