@@ -326,7 +326,7 @@ class FoundationBackend:
         # double-registration on page refresh / resume)
         self._wired_sessions: set[str] = set()
         self._prepared_bundle: Any | None = None  # Pre-warmed bundle cache
-        self._bundle_version: str = ""             # Version string for staleness detection
+        self._bundle_version: str = ""  # Version string for staleness detection
 
     async def _load_bundle(self, bundle_name: str | None = None) -> Any:
         """Load and prepare a bundle via foundation.
@@ -352,6 +352,21 @@ class FoundationBackend:
             name = bundle_name or self._bundle_name
             bundle = await load_bundle(name)
         return await bundle.prepare()
+
+    async def startup(self) -> None:
+        """Pre-warm the bundle at server startup so first create_session() is instant.
+        Called by FastAPI's startup event handler (wired in app.py).
+        Sets self._prepared_bundle so _load_bundle() returns the cached value on
+        all subsequent calls.
+        """
+        logger.info("Pre-warming bundle...")
+        self._prepared_bundle = await self._load_bundle()
+        self._bundle_version = self._compute_bundle_version()
+        logger.info("Bundle pre-warmed and ready")
+
+    def _compute_bundle_version(self) -> str:
+        """Return a version string based on overlay file mtime. Stub — see Task 9."""
+        return ""
 
     def _wire_event_queue(
         self, session: Any, session_id: str, event_queue: asyncio.Queue
