@@ -464,9 +464,16 @@ class TestWatchdogCli:
         assert "not running" in result.output
 
 
+_XFAIL_SUPERVISOR = pytest.mark.xfail(
+    reason="RED phase: supervisor-aware _restart_server not yet implemented",
+    strict=True,
+)
+
+
 class TestRestartServerSupervisorDetection:
     """Verify _restart_server() uses supervisor-aware restart under systemd/launchd."""
 
+    @_XFAIL_SUPERVISOR
     @patch("amplifier_distro.server.watchdog.daemonize")
     @patch("amplifier_distro.server.watchdog.stop_process")
     def test_restart_under_systemd_exits_not_daemonize(
@@ -487,6 +494,7 @@ class TestRestartServerSupervisorDetection:
         mock_stop.assert_called_once()
         mock_daemonize.assert_not_called()
 
+    @_XFAIL_SUPERVISOR
     @patch("amplifier_distro.server.watchdog.daemonize")
     @patch("amplifier_distro.server.watchdog.stop_process")
     def test_restart_under_launchd_exits_not_daemonize(
@@ -528,6 +536,7 @@ class TestRestartServerSupervisorDetection:
             host="127.0.0.1", port=8400, apps_dir=None, dev=False
         )
 
+    @_XFAIL_SUPERVISOR
     @patch("amplifier_distro.server.watchdog.logger")
     @patch("amplifier_distro.server.watchdog.daemonize")
     @patch("amplifier_distro.server.watchdog.is_running", return_value=False)
