@@ -42,10 +42,10 @@ on_session_start() — existing handler
               ├─ glob sessions/*/handoff.md
               ├─ sort by mtime, pick newest
               ├─ read content
-              └─ inject via context.set_messages()
+              └─ return HookResult(action="inject_context", ...)
 ```
 
-The injection uses the same pattern as `_reconnect()` in `session_backend.py`, which calls `context.set_messages()`. The hook already has access to the coordinator at mount time, so no wiring changes are needed.
+The hook returns `HookResult(action="inject_context", context_injection=content, context_injection_role="system")` from `on_session_start`. No coordinator access or additional wiring is needed — the `HookResult` carries the injection payload back to the kernel directly.
 
 ## Components
 
@@ -60,7 +60,7 @@ The injection uses the same pattern as `_reconnect()` in `session_backend.py`, w
    ```
 2. Sort results by file modification time (newest first).
 3. Read the most recent handoff file.
-4. Inject content into the session context via `context.set_messages()`.
+4. Return `HookResult(action="inject_context", context_injection=<content>, context_injection_role="system")`.
 5. If no handoff exists, return without error — session starts blank (same as today).
 
 The `projects_dir` already exists as a config path used by generation; injection reads from the same location.
@@ -88,7 +88,7 @@ New session starts in same working directory
   → glob ~/.amplifier/projects/<slug>/sessions/*/handoff.md
   → sort by mtime → pick newest
   → read file content
-  → inject into session context via context.set_messages()
+  → return HookResult(action="inject_context", context_injection=content, context_injection_role="system")
   → assistant begins session with prior context already loaded
 ```
 

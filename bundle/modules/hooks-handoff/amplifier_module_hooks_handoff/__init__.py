@@ -72,12 +72,31 @@ class HandoffHook:
         self._coordinator: Any = None
 
     async def on_session_start(self, event: str, data: dict[str, Any]) -> HookResult:
-        """Track session metadata on start."""
+        """Track session metadata on start and inject the most recent handoff."""
         self.state.session_id = data.get("session_id", "")
         self.state.working_directory = data.get("working_directory", "")
         self.state.project_slug = self._derive_project_slug(
             self.state.working_directory
         )
+
+        if not self.config.enabled:
+            return HookResult(action="continue")
+
+        if data.get("parent_id"):
+            # Sub-sessions skip injection — they inherit context from the parent.
+            return HookResult(action="continue")
+
+        content = self._find_latest_handoff(self.state.project_slug)
+        if content:
+            logger.debug(
+                "Injecting prior handoff for project %r", self.state.project_slug
+            )
+            return HookResult(
+                action="inject_context",
+                context_injection=content,
+                context_injection_role="system",
+            )
+
         return HookResult(action="continue")
 
     async def on_prompt_complete(self, event: str, data: dict[str, Any]) -> HookResult:
@@ -226,6 +245,33 @@ files_changed:
         handoff_path = session_dir / "handoff.md"
         handoff_path.write_text(content, encoding="utf-8")
         logger.info("Handoff written to %s", handoff_path)
+
+    def _find_latest_handoff(self, slug: str) -> str | None:
+        """Return content of the most recent handoff.md for this project, or None.
+
+        Globs <projects_dir>/<slug>/sessions/*/handoff.md, sorts by file mtime
+        (newest first), reads the top result, and returns its content as a string.
+        Returns None if no files exist, or if the newest file is empty.
+        """
+        sessions_dir = Path(self.config.projects_dir) / slug / "sessions"
+        if not sessions_dir.exists():
+            return None
+        candidates = sorted(
+            (p for p in sessions_dir.glob("*/handoff.md") if p.exists()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not candidates:
+            return None
+        try:
+            content = candidates[0].read_text(encoding="utf-8").strip()
+        except OSError:
+            logger.warning("Could not read handoff file: %s", candidates[0])
+            return None
+        if not content:
+            logger.warning("Most recent handoff file is empty: %s", candidates[0])
+            return None
+        return content
 
     def _derive_project_slug(self, working_dir: str) -> str:
         """Derive project slug from working directory."""
