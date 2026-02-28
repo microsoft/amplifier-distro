@@ -175,3 +175,17 @@ class LogDisplaySystem:
     @property
     def nesting_depth(self) -> int:
         return 0
+
+
+def headless_surface() -> SessionSurface:
+    """Create a SessionSurface for headless execution contexts.
+
+    Intended for Slack messages, recipes, and scheduled jobs — environments
+    where there is no browser WebSocket connection. Approvals are
+    auto-approved and display messages are routed to the Python logging
+    framework via LogDisplaySystem.
+    """
+    return SessionSurface(
+        approval_system=ApprovalSystem(auto_approve=True),
+        display_system=LogDisplaySystem(),
+    )
