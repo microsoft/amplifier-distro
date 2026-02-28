@@ -144,9 +144,11 @@ class TestSystemdWatchdogUnit:
 
     def test_runs_watchdog_subcommand(self) -> None:
         content = self._generate()
-        assert "watchdog" in content
-        assert "amplifier_distro.server.watchdog" not in content
-        assert "-m" not in content
+        parser = self._parse(content)
+        exec_start = parser["Service"]["execstart"]
+        assert "watchdog" in exec_start
+        assert "amplifier_distro.server.watchdog" not in exec_start
+        assert "-m" not in exec_start
 
     def test_has_environment_path(self) -> None:
         content = self._generate()

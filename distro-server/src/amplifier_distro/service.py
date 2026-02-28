@@ -87,7 +87,8 @@ def install_service(include_watchdog: bool = True) -> ServiceResult:
         message="Unsupported platform for automatic service installation.",
         details=[
             "Supported: Linux (systemd), macOS (launchd).",
-            "For Windows, use Task Scheduler to run: amp-distro-server start",
+            "For Windows, use Task Scheduler or NSSM to run: amp-distro serve",
+            "Windows service support tracked in GitHub issue #21.",
         ],
     )
 
@@ -247,13 +248,10 @@ def _generate_systemd_watchdog_unit(distro_bin: str) -> str:
     Returns:
         Complete systemd unit file content as a string.
     """
-    # Use a standard system PATH for the watchdog unit; avoids embedding
-    # the caller's full PATH (which may contain dev-specific entries).
-    path_env = "/usr/local/bin:/usr/bin:/bin"
+    path_env = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
     port = conventions.SERVER_DEFAULT_PORT
     service_name = conventions.SERVICE_NAME
     amplifier_home = Path(conventions.AMPLIFIER_HOME).expanduser()
-    exec_start = f"{distro_bin} watchdog --host 127.0.0.1 --port {port}"
     return dedent(f"""\
         [Unit]
         Description=Amplifier Distro Watchdog
@@ -262,7 +260,7 @@ def _generate_systemd_watchdog_unit(distro_bin: str) -> str:
 
         [Service]
         Type=simple
-        ExecStart={exec_start}
+        ExecStart={distro_bin} watchdog --host 127.0.0.1 --port {port}
         Restart=always
         RestartSec=10
         StartLimitIntervalSec=300
@@ -301,9 +299,10 @@ def _install_systemd(include_watchdog: bool) -> ServiceResult:
         return ServiceResult(
             success=False,
             platform="linux",
-            message="amp-distro binary not found.",
+            message="Failed: amp-distro binary not found.",
             details=[
-                "Install amplifier-distro first: uv tool install amplifier-distro"
+                "Ensure ~/.local/bin is on PATH, or reinstall:",
+                "  uv tool install amplifier-distro",
             ],
         )
 
@@ -571,9 +570,7 @@ def _generate_launchd_watchdog_plist(distro_bin: str) -> str:
     srv_dir = str(
         Path(conventions.AMPLIFIER_HOME).expanduser() / conventions.SERVER_DIR
     )
-    # Use a standard system PATH; avoids embedding the caller's full PATH
-    # (which may contain dev-specific entries) into the launchd agent.
-    path_env = "/usr/local/bin:/usr/bin:/bin"
+    path_env = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
     return dedent(f"""\
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -632,9 +629,10 @@ def _install_launchd(include_watchdog: bool) -> ServiceResult:
         return ServiceResult(
             success=False,
             platform="macos",
-            message="amp-distro binary not found.",
+            message="Failed: amp-distro binary not found.",
             details=[
-                "Install amplifier-distro first: uv tool install amplifier-distro"
+                "Ensure ~/.local/bin is on PATH, or reinstall:",
+                "  uv tool install amplifier-distro",
             ],
         )
 
