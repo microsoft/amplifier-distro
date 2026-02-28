@@ -517,7 +517,6 @@ class TestRestartServerSupervisorDetection:
         mock_stop.assert_called_once()
         mock_daemonize.assert_not_called()
 
-    @_XFAIL_SUPERVISOR
     @patch("amplifier_distro.server.watchdog.daemonize")
     @patch("amplifier_distro.server.watchdog.is_running", return_value=False)
     def test_restart_standalone_calls_daemonize(
