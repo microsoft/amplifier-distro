@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock
+
+import pytest
 
 # ── ApprovalSystem: auto-approve mode ──────────────────────────────────
 
@@ -182,3 +185,54 @@ class TestQueueDisplaySystem:
         d = QueueDisplaySystem(q)
         d2 = d.pop_nesting()
         assert d2.nesting_depth == 0
+
+
+# ── LogDisplaySystem ────────────────────────────────────────────────────────────
+
+
+class TestLogDisplaySystem:
+    def test_show_message_info_routes_to_logger(self, caplog: pytest.LogCaptureFixture):
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
+
+        display = LogDisplaySystem()
+        with caplog.at_level(logging.INFO, logger="amplifier_distro.display"):
+            display.show_message("hello world", level="info", source="test-hook")
+        assert "hello world" in caplog.text
+
+    def test_show_message_warning_routes_at_warning_level(
+        self, caplog: pytest.LogCaptureFixture
+    ):
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
+
+        display = LogDisplaySystem()
+        with caplog.at_level(logging.WARNING, logger="amplifier_distro.display"):
+            display.show_message("uh oh", level="warning", source="test-hook")
+        assert "uh oh" in caplog.text
+
+    def test_show_message_error_routes_at_error_level(
+        self, caplog: pytest.LogCaptureFixture
+    ):
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
+
+        display = LogDisplaySystem()
+        with caplog.at_level(logging.ERROR, logger="amplifier_distro.display"):
+            display.show_message("kaboom", level="error", source="test-hook")
+        assert "kaboom" in caplog.text
+
+    def test_push_nesting_returns_self(self):
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
+
+        display = LogDisplaySystem()
+        assert display.push_nesting() is display
+
+    def test_pop_nesting_returns_self(self):
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
+
+        display = LogDisplaySystem()
+        assert display.pop_nesting() is display
+
+    def test_nesting_depth_is_zero(self):
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
+
+        display = LogDisplaySystem()
+        assert display.nesting_depth == 0
