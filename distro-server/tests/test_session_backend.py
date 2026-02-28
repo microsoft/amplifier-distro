@@ -952,3 +952,42 @@ class TestMockBackendNewMethods:
         q: asyncio.Queue = asyncio.Queue()
         await backend.resume_session("s", "~", event_queue=q)
         assert any(c["method"] == "resume_session" for c in backend.calls)
+
+
+# ── FoundationBackend._load_bundle cache ──────────────────────────────────────
+
+
+class TestFoundationBackendBundleCache:
+    """_load_bundle() must return _prepared_bundle when it is set (cache hit)."""
+
+    async def test_load_bundle_returns_cached_bundle_without_hitting_foundation(
+        self, bridge_backend
+    ):
+        """Cache hit: when _prepared_bundle is set, _load_bundle returns it directly.
+
+        Once pre-warmed, no I/O or foundation loading should occur.
+        """
+        mock_bundle = MagicMock()
+        bridge_backend._prepared_bundle = mock_bundle
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        result = await FoundationBackend._load_bundle(bridge_backend)
+        assert result is mock_bundle
+
+    async def test_load_bundle_cache_miss_when_prepared_bundle_is_none(
+        self, bridge_backend
+    ):
+        """Cache miss: _prepared_bundle=None forces _load_bundle to attempt real load.
+
+        It must NOT silently return None — it must raise (ImportError/AttributeError)
+        because amplifier_foundation is not installed in the test environment.
+        This guards against an implementation bug where the cache always returns
+        the stored value even when it is explicitly None.
+        """
+        bridge_backend._prepared_bundle = None
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        with pytest.raises((ImportError, AttributeError)):
+            await FoundationBackend._load_bundle(bridge_backend)
