@@ -369,6 +369,8 @@ class TestWebChatSurface:
 
         q: asyncio.Queue = asyncio.Queue()
         surface = web_chat_surface(q)
+        # Simulate the approval system firing its internal queue-push callback
+        # directly — tests the wiring without triggering a full request_approval round-trip
         await surface.approval_system._on_approval_request(
             "req-001", "Allow tool?", ["allow", "deny"], 300.0, "deny"
         )
@@ -382,7 +384,7 @@ class TestWebChatSurface:
 
         q: asyncio.Queue = asyncio.Queue()
         surface = web_chat_surface(q)
-        await surface.display_system.show_message("Thinking\u2026", level="info", source="hook")
+        await surface.display_system.show_message("Thinking…", level="info", source="hook")
         event_type, data = q.get_nowait()
         assert event_type == "display_message"
-        assert data["message"] == "Thinking\u2026"
+        assert data["message"] == "Thinking…"
