@@ -1200,3 +1200,98 @@ class TestFoundationBackendReloadBundle:
         mock_logger.warning.assert_called_once()
         call_kwargs = mock_logger.warning.call_args
         assert call_kwargs.kwargs.get("exc_info") is True
+
+    async def test_reload_bundle_calls_on_bundle_reload_on_active_surfaces(
+        self, bridge_backend
+    ):
+        """reload_bundle() notifies every active session surface via on_bundle_reload."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
+
+        on_reload_a = AsyncMock()
+        handle_a = _make_mock_handle("sess-surf-a")
+        handle_a.surface = MagicMock()
+        handle_a.surface.on_bundle_reload = on_reload_a
+
+        on_reload_b = AsyncMock()
+        handle_b = _make_mock_handle("sess-surf-b")
+        handle_b.surface = MagicMock()
+        handle_b.surface.on_bundle_reload = on_reload_b
+
+        bridge_backend._sessions = {
+            "sess-surf-a": handle_a,
+            "sess-surf-b": handle_b,
+        }
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)
+
+        on_reload_a.assert_awaited_once()
+        on_reload_b.assert_awaited_once()
+
+    async def test_reload_bundle_skips_sessions_without_surface(
+        self, bridge_backend
+    ):
+        """reload_bundle() skips sessions whose handle has no surface — must not raise."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
+
+        handle = _make_mock_handle("sess-no-surf")
+        handle.surface = None
+
+        bridge_backend._sessions = {"sess-no-surf": handle}
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)  # must not raise
+
+    async def test_reload_bundle_skips_surfaces_with_no_on_bundle_reload(
+        self, bridge_backend
+    ):
+        """reload_bundle() skips surfaces that have on_bundle_reload = None — must not raise."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
+
+        handle = _make_mock_handle("sess-no-callback")
+        handle.surface = MagicMock()
+        handle.surface.on_bundle_reload = None
+
+        bridge_backend._sessions = {"sess-no-callback": handle}
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)  # must not raise
+
+    async def test_reload_bundle_continues_past_surface_error(
+        self, bridge_backend
+    ):
+        """reload_bundle() continues to other surfaces when one raises — must not raise."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
+
+        handle_a = _make_mock_handle("sess-err-a")
+        handle_a.surface = MagicMock()
+        handle_a.surface.on_bundle_reload = AsyncMock(
+            side_effect=RuntimeError("surface exploded")
+        )
+
+        on_reload_b = AsyncMock()
+        handle_b = _make_mock_handle("sess-err-b")
+        handle_b.surface = MagicMock()
+        handle_b.surface.on_bundle_reload = on_reload_b
+
+        bridge_backend._sessions = {
+            "sess-err-a": handle_a,
+            "sess-err-b": handle_b,
+        }
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)  # must not raise
+
+        on_reload_b.assert_awaited_once()
