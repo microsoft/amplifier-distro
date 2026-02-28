@@ -325,15 +325,23 @@ class FoundationBackend:
         # Guard: sessions whose hooks have already been wired (prevents
         # double-registration on page refresh / resume)
         self._wired_sessions: set[str] = set()
+        self._prepared_bundle: Any | None = None  # Pre-warmed bundle cache
+        self._bundle_version: str = ""             # Version string for staleness detection
 
     async def _load_bundle(self, bundle_name: str | None = None) -> Any:
         """Load and prepare a bundle via foundation.
+
+        If _prepared_bundle is already set (pre-warmed by startup()), returns the
+        cached value immediately without any I/O.
 
         If a local overlay bundle exists (created by the install wizard),
         loads it by path.  The overlay includes the maintained distro bundle and any
         user-selected features, so everything composes automatically.
         Falls back to loading the bundle by name if no overlay exists.
         """
+        if self._prepared_bundle is not None:
+            return self._prepared_bundle
+
         from amplifier_foundation import load_bundle
 
         from amplifier_distro.overlay import overlay_dir, overlay_exists

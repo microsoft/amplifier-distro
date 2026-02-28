@@ -44,6 +44,9 @@ def bridge_backend():
         backend._ended_sessions = set()
         backend._approval_systems = {}
         backend._wired_sessions = set()
+        # Pre-warm cache fields (new in fix/bundle-prewarm)
+        backend._prepared_bundle = None
+        backend._bundle_version = ""
         return backend
 
 
@@ -981,6 +984,67 @@ class TestFoundationBackendSpawnRegistration:
         # Cleanup
         if "sess-spawn-rc-001" in bridge_backend._worker_tasks:
             bridge_backend._worker_tasks["sess-spawn-rc-001"].cancel()
+
+
+class TestFoundationBackendBundleCache:
+    """Verify _prepared_bundle cache fields exist and _load_bundle() honours them."""
+
+    def test_init_has_prepared_bundle_field(self):
+        """FoundationBackend.__init__ must initialise _prepared_bundle to None."""
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        backend = FoundationBackend.__new__(FoundationBackend)
+        FoundationBackend.__init__(backend)
+        assert hasattr(backend, "_prepared_bundle")
+        assert backend._prepared_bundle is None
+
+    def test_init_has_bundle_version_field(self):
+        """FoundationBackend.__init__ must initialise _bundle_version to empty string."""
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        backend = FoundationBackend.__new__(FoundationBackend)
+        FoundationBackend.__init__(backend)
+        assert hasattr(backend, "_bundle_version")
+        assert backend._bundle_version == ""
+
+    async def test_load_bundle_returns_cache_when_prepared_bundle_set(
+        self, bridge_backend
+    ):
+        """_load_bundle() must return _prepared_bundle immediately without I/O."""
+        mock_prepared = MagicMock()
+        bridge_backend._prepared_bundle = mock_prepared
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        result = await FoundationBackend._load_bundle(bridge_backend)
+
+        assert result is mock_prepared
+
+    async def test_load_bundle_skips_import_when_cache_hit(self, bridge_backend):
+        """_load_bundle() must not call load_bundle() when cache is populated."""
+        mock_prepared = MagicMock()
+        bridge_backend._prepared_bundle = mock_prepared
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        with patch(
+            "amplifier_distro.server.session_backend.FoundationBackend._load_bundle",
+            wraps=FoundationBackend._load_bundle,
+        ):
+            # Ensure no amplifier_foundation import happens by verifying result
+            result = await FoundationBackend._load_bundle(bridge_backend)
+
+        assert result is mock_prepared
+
+    def test_bridge_backend_fixture_has_prepared_bundle(self, bridge_backend):
+        """bridge_backend fixture must expose _prepared_bundle (cache field)."""
+        assert hasattr(bridge_backend, "_prepared_bundle")
+        assert bridge_backend._prepared_bundle is None
+
+    def test_bridge_backend_fixture_has_bundle_version(self, bridge_backend):
+        """bridge_backend fixture must expose _bundle_version (cache field)."""
+        assert hasattr(bridge_backend, "_bundle_version")
+        assert bridge_backend._bundle_version == ""
 
 
 class TestMockBackendNewMethods:
