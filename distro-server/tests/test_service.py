@@ -90,9 +90,10 @@ class TestSystemdServerUnit:
 
     def test_correct_exec_start(self) -> None:
         content = self._generate("/my/custom/path/amp-distro")
-        assert "/my/custom/path/amp-distro" in content
-        assert "serve" in content
-        assert "amp-distro-server" not in content
+        parser = self._parse(content)
+        exec_start = parser["Service"]["execstart"]  # configparser lowercases keys
+        assert exec_start.startswith("/my/custom/path/amp-distro serve")
+        assert "amp-distro-server" not in exec_start
 
     def test_has_environment_path(self) -> None:
         content = self._generate()
