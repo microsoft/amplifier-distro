@@ -125,7 +125,7 @@ class SessionBackend(Protocol):
         self,
         session_id: str,
         working_dir: str,
-        event_queue: asyncio.Queue | None = None,
+        surface: SessionSurface | None = None,
     ) -> None:
         """Restore LLM transcript context for a previously created session."""
         ...
@@ -250,7 +250,7 @@ class MockBackend:
         return self._message_history.get(session_id, [])
 
     async def resume_session(
-        self, session_id: str, working_dir: str, event_queue: Any = None
+        self, session_id: str, working_dir: str, surface: Any = None
     ) -> None:
         """No-op resume for testing. Records the call for assertion."""
         self.calls.append(
@@ -1092,19 +1092,19 @@ class FoundationBackend:
         self,
         session_id: str,
         working_dir: str,
-        event_queue: asyncio.Queue | None = None,
+        surface: SessionSurface | None = None,
     ) -> None:
         """Restore the LLM context for a session after a server restart."""
-        if event_queue is not None:
+        if surface is not None:
             self._ended_sessions.discard(session_id)
 
         if self._sessions.get(session_id) is None:
             await self._reconnect(session_id, working_dir=working_dir)
 
-        if event_queue is not None:
+        if surface is not None:
             handle = self._sessions.get(session_id)
             if handle is not None:
-                self._wire_event_queue(handle.session, session_id, event_queue)
+                self._attach_surface(handle.session, session_id, surface)
 
             # Ensure worker queue + task exist after resume
             if session_id not in self._session_queues:

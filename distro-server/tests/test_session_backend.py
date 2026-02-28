@@ -945,12 +945,12 @@ class TestMockBackendNewMethods:
         backend = MockBackend()
         assert backend.resolve_approval("s", "r", "allow") is False
 
-    async def test_resume_session_accepts_event_queue(self):
+    async def test_resume_session_accepts_surface(self):
         from amplifier_distro.server.session_backend import MockBackend
 
         backend = MockBackend()
         q: asyncio.Queue = asyncio.Queue()
-        await backend.resume_session("s", "~", event_queue=q)
+        await backend.resume_session("s", "~", surface=web_chat_surface(q))
         assert any(c["method"] == "resume_session" for c in backend.calls)
 
 
@@ -1090,3 +1090,66 @@ class TestCreateSessionSurface:
             )
 
         assert "sess-webchat-001" in bridge_backend._approval_systems
+
+
+# ── TestResumeSessionSurface ───────────────────────────────────────────────────
+
+
+class TestResumeSessionSurface:
+    """resume_session(surface=...) must be accepted and dispatch correctly."""
+
+    async def test_resume_session_accepts_surface_parameter(self, bridge_backend):
+        """resume_session() must accept a surface= keyword argument and wire approval.
+
+        Passes a web_chat_surface carrying an event queue; expects the approval
+        system to be registered in bridge_backend._approval_systems after the call.
+        """
+        q: asyncio.Queue = asyncio.Queue()
+
+        mock_session = MagicMock()
+        mock_session.coordinator = MagicMock()
+        mock_session.coordinator.hooks = MagicMock()
+
+        mock_handle = MagicMock()
+        mock_handle.session = mock_session
+
+        bridge_backend._sessions["sess-resume-surface-001"] = mock_handle
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        with patch("asyncio.create_task") as mock_create_task:
+            mock_create_task.return_value = MagicMock()
+            await FoundationBackend.resume_session(
+                bridge_backend,
+                "sess-resume-surface-001",
+                "/tmp",
+                surface=web_chat_surface(q),
+            )
+
+        assert "sess-resume-surface-001" in bridge_backend._approval_systems
+
+    async def test_resume_session_surface_none_does_not_error(self, bridge_backend):
+        """resume_session(surface=None) must not raise or create approval system.
+
+        When no surface is provided the method is a lightweight reconnect-only
+        operation; it must not populate _approval_systems.
+        """
+        mock_session = MagicMock()
+        mock_session.coordinator = MagicMock()
+        mock_session.coordinator.hooks = MagicMock()
+
+        mock_handle = MagicMock()
+        mock_handle.session = mock_session
+
+        bridge_backend._sessions["sess-noop-001"] = mock_handle
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.resume_session(
+            bridge_backend,
+            "sess-noop-001",
+            "/tmp",
+            surface=None,
+        )
+
+        assert "sess-noop-001" not in bridge_backend._approval_systems
