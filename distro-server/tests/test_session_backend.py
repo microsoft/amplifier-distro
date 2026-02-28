@@ -999,7 +999,7 @@ class TestFoundationBackendBundleCache:
         assert backend._prepared_bundle is None
 
     def test_init_has_bundle_version_field(self):
-        """FoundationBackend.__init__ must initialise _bundle_version to empty string."""
+        """FoundationBackend.__init__ must initialise _bundle_version to ``""``."""
         from amplifier_distro.server.session_backend import FoundationBackend
 
         backend = FoundationBackend.__new__(FoundationBackend)
@@ -1045,6 +1045,46 @@ class TestFoundationBackendBundleCache:
         """bridge_backend fixture must expose _bundle_version (cache field)."""
         assert hasattr(bridge_backend, "_bundle_version")
         assert bridge_backend._bundle_version == ""
+
+
+class TestFoundationBackendStartup:
+    """startup() pre-warms the bundle: calls _load_bundle() and caches the result."""
+
+    async def test_startup_sets_prepared_bundle(self, bridge_backend):
+        """startup() must store the loaded bundle in _prepared_bundle."""
+        mock_bundle = MagicMock()
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="")
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.startup(bridge_backend)
+
+        assert bridge_backend._prepared_bundle is mock_bundle
+
+    async def test_startup_calls_load_bundle_once(self, bridge_backend):
+        """startup() must call _load_bundle() exactly once with no arguments."""
+        mock_bundle = MagicMock()
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="")
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.startup(bridge_backend)
+
+        bridge_backend._load_bundle.assert_awaited_once_with()
+
+    async def test_startup_sets_bundle_version(self, bridge_backend):
+        """startup() must store the computed bundle version in _bundle_version."""
+        mock_bundle = MagicMock()
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="1234567.89")
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.startup(bridge_backend)
+
+        assert bridge_backend._bundle_version == "1234567.89"
 
 
 class TestMockBackendNewMethods:
