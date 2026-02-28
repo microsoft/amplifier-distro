@@ -1,24 +1,62 @@
 # amplifier-distro
 
-Monorepo for Amplifier distro components.
+The complete distribution layer for [Amplifier](https://github.com/microsoft/amplifier). It handles the install and onboarding experience to get Amplifier working correctly, bundles a curated set of experience apps, and ships a set of optional capabilities users can enable as they go.
 
-## Projects
-
-## distro server
-
-The [Amplifier Experience Server](distro-server/) — web chat, Slack, voice, and more.
-
-A server that hosts multiple interfaces to Amplifier sessions. It connects
-browsers, Slack workspaces, and voice clients to the same Amplifier runtime,
-with shared memory across all of them.
+Everything in amplifier-distro is built around the [`AMPLIFIER_HOME_CONTRACT`](AMPLIFIER_HOME_CONTRACT.md) — the shared filesystem spec that lets any interface share sessions, memory, and state.
 
 ## Install
+
+**Prerequisites:** `git`, [`gh`](https://cli.github.com) (authenticated), [`uv`](https://docs.astral.sh/uv/) (auto-installed if missing)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/microsoft/amplifier-distro/main/install.sh | bash
 ```
 
-### Developer
+The installer verifies your environment, installs the `amp-distro` tool, and walks you through provider setup so Amplifier works immediately.
+
+Then start the server:
+
+```bash
+amp-distro serve
+```
+
+Open [http://localhost:8400](http://localhost:8400) to begin.
+
+## Experience Apps
+
+Multiple front-ends into the same Amplifier runtime — sessions, memory, and context are shared across all of them.
+
+| App | Description |
+|-----|-------------|
+| **Web Chat** | Browser-based chat with full session persistence |
+| **Slack** | Full Slack bridge via Socket Mode |
+| **Voice** | WebRTC voice via OpenAI Realtime API |
+| **Routines** | Scheduled recipe execution |
+
+Apps included in amplifier-distro conform to the [AMPLIFIER_HOME_CONTRACT](AMPLIFIER_HOME_CONTRACT.md). The set will grow over time.
+
+## Capabilities
+
+amplifier-distro ships an `amplifier-start` bundle with a set of conventions and capabilities users can opt into:
+
+**Providers** — configure any combination:
+
+| Provider | Key |
+|----------|-----|
+| Anthropic | `ANTHROPIC_API_KEY` |
+| OpenAI | `OPENAI_API_KEY` |
+| Google | `GOOGLE_API_KEY` |
+| xAI | `XAI_API_KEY` |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY` |
+| Ollama | `OLLAMA_HOST` (local) |
+
+**Features** — opt-in capabilities:
+- Persistent memory, planning mode
+- Vector search, recipes, content studio, session discovery, routines
+
+The onboarding experience guides setup. Capabilities can be enabled or changed at any time via `amp-distro serve`.
+
+## Developer Install
 
 ```bash
 git clone https://github.com/microsoft/amplifier-distro && cd amplifier-distro
@@ -26,7 +64,7 @@ cd distro-server
 uv tool install -e .
 ```
 
-## Usage
+## Commands
 
 ### `amp-distro serve` — Start the experience server
 
@@ -34,9 +72,6 @@ uv tool install -e .
 amp-distro serve                 # Foreground on http://localhost:8400
 amp-distro serve --reload        # Auto-reload for development
 ```
-
-The server hosts web chat, Slack bridge, voice interface, and routines
-scheduler. Visit http://localhost:8400/.
 
 ### `amp-distro backup` / `restore` — State backup
 
@@ -46,8 +81,7 @@ amp-distro restore               # Restore from backup
 amp-distro backup --name my-bak  # Custom backup repo name
 ```
 
-Uses a private GitHub repo (created automatically via `gh` CLI).
-API keys are never backed up.
+Uses a private GitHub repo (created automatically via `gh`). API keys are never backed up.
 
 ### `amp-distro service` — Auto-start on boot
 
@@ -57,16 +91,13 @@ amp-distro service uninstall     # Remove the service
 amp-distro service status        # Check service status
 ```
 
-## Experience Apps
-
-| App | Path | Description |
-|-----|------|-------------|
-| Web Chat | `/apps/chat/` | Browser-based chat with session persistence |
-| Slack | `/apps/slack/` | Full Slack bridge via Socket Mode |
-| Voice | `/apps/voice/` | WebRTC voice via OpenAI Realtime API |
-
-## Documents
+## Docs
 
 | File | Description |
 |------|-------------|
-| [distro-server/docs/SLACK_SETUP.md](docs/SLACK_SETUP.md) | Slack bridge setup guide |
+| [AMPLIFIER_HOME_CONTRACT.md](AMPLIFIER_HOME_CONTRACT.md) | Filesystem contract all apps must conform to |
+| [distro-server/docs/SLACK_SETUP.md](distro-server/docs/SLACK_SETUP.md) | Slack bridge setup guide |
+
+## License
+
+MIT — see [LICENSE](LICENSE).

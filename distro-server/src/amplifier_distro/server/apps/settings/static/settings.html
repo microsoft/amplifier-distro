@@ -641,6 +641,106 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Preflight Checks                                                   */
+/* ------------------------------------------------------------------ */
+.preflight-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 2px;
+}
+
+.preflight-summary-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.preflight-status-icon {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: rgba(107,114,128,0.15);
+}
+
+.preflight-count {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.preflight-count strong {
+  color: var(--text-primary);
+}
+
+.preflight-phase {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: rgba(59,130,246,0.15);
+  color: var(--accent);
+}
+
+.check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--bg-card);
+  font-size: 13px;
+  border-top: 1px solid rgba(75,85,99,0.4);
+}
+
+.check-row:last-child {
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.check-icon {
+  width: 20px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.check-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  min-width: 130px;
+}
+
+.check-message {
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check-row.check-warn {
+  background: rgba(245,158,11,0.04);
+}
+
+.check-row.check-fail {
+  background: rgba(239,68,68,0.04);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Toast Notification                                                 */
 /* ------------------------------------------------------------------ */
 .toast {
@@ -952,8 +1052,6 @@ function render() {
   const tier2 = features.filter(f => f.tier === 2);
 
   card.innerHTML = renderHeader()
-    + renderServerInfo()
-    + '<hr class="section-divider">'
     + renderConfigSection(config)
     + '<hr class="section-divider">'
     + renderProviders()
@@ -969,6 +1067,8 @@ function render() {
     + renderIntegrations()
     + '<hr class="section-divider">'
     + renderEnvironment(detect)
+    + '<hr class="section-divider">'
+    + renderPreflightChecks()
     + renderFooter();
 
   bindEvents();
@@ -987,32 +1087,66 @@ function renderHeader() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Server Info                                                        */
+/*  Preflight Checks                                                   */
 /* ------------------------------------------------------------------ */
-function renderServerInfo() {
+function renderPreflightChecks() {
   const ss = state.serverStatus || {};
-  const passedCount = ss.checks ? ss.checks.filter(c => c.passed).length : 0;
-  const totalCount = ss.checks ? ss.checks.length : 0;
+  const checks = ss.checks || [];
+  const passedCount = checks.filter(c => c.passed).length;
+  const totalCount = checks.length;
   const allPassed = ss.passed !== false;
+  const phase = state.status && state.status.phase ? state.status.phase : '--';
 
-  return '<div class="section">'
-    + '<div class="section-title">Server</div>'
-    + '<div class="stats-grid">'
-    + '<div class="stat-card">'
-    + '<div class="stat-value" style="color:' + (allPassed ? 'var(--success)' : 'var(--warning)') + ';">'
-    + (allPassed ? 'OK' : 'WARN') + '</div>'
-    + '<div class="stat-label">Preflight</div>'
+  // Summary bar
+  const summaryColor = allPassed ? 'var(--success)' : 'var(--warning)';
+  const summaryIcon = allPassed ? 'OK' : 'WARN';
+
+  let html = '<div class="section">'
+    + '<div class="section-title">Preflight Checks</div>'
+    + '<div class="preflight-summary">'
+    + '<div class="preflight-summary-left">'
+    +   '<span class="preflight-status-icon" style="color:' + summaryColor + ';">' + summaryIcon + '</span>'
+    +   '<span class="preflight-count">'
+    +     '<strong>' + passedCount + '/' + totalCount + '</strong> checks passed'
+    +   '</span>'
     + '</div>'
-    + '<div class="stat-card">'
-    + '<div class="stat-value">' + passedCount + '/' + totalCount + '</div>'
-    + '<div class="stat-label">Checks Passed</div>'
-    + '</div>'
-    + '<div class="stat-card">'
-    + '<div class="stat-value">' + esc(state.status && state.status.phase ? state.status.phase : '--') + '</div>'
-    + '<div class="stat-label">Phase</div>'
-    + '</div>'
-    + '</div>'
+    + '<span class="preflight-phase">' + esc(phase) + '</span>'
     + '</div>';
+
+  // Individual checks
+  if (totalCount > 0) {
+    html += '<div class="check-list">';
+    checks.forEach(function(c) {
+      var icon, iconColor, rowClass;
+      if (c.passed) {
+        icon = '&#10003;';
+        iconColor = 'var(--success)';
+        rowClass = 'check-passed';
+      } else if (c.severity === 'warning') {
+        icon = '!';
+        iconColor = 'var(--warning)';
+        rowClass = 'check-warn';
+      } else {
+        icon = '&#10005;';
+        iconColor = 'var(--error)';
+        rowClass = 'check-fail';
+      }
+
+      html += '<div class="check-row ' + rowClass + '">'
+        + '<span class="check-icon" style="color:' + iconColor + ';">' + icon + '</span>'
+        + '<span class="check-name">' + esc(c.name) + '</span>'
+        + '<span class="check-message">' + esc(c.message) + '</span>'
+        + '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="color: var(--text-secondary); font-size: 13px; padding: 20px 0;">'
+      + 'No check data available. The server may still be initializing.'
+      + '</div>';
+  }
+
+  html += '</div>';
+  return html;
 }
 
 /* ------------------------------------------------------------------ */

@@ -12,7 +12,7 @@ import copy
 from typing import Any
 
 try:
-    from amplifier_core.models import HookResult as _HookResult
+    from amplifier_core.models import HookResult as _HookResult  # type: ignore[import]
 
     _HOOK_RESULT_AVAILABLE = True
 except ImportError:
@@ -33,7 +33,7 @@ EVENTS_TO_CAPTURE: list[str] = [
     "session:fork",
     "session:start",
     "session:end",
-    "session:resume",
+    "session:resume",  # handled by fallback → session_resume
     "provider:request",
     "llm:request",
     "llm:request:raw",
@@ -44,8 +44,8 @@ EVENTS_TO_CAPTURE: list[str] = [
     "user:notification",
     "cancel:requested",
     "cancel:completed",
-    "orchestrator:complete",
-    "prompt:submit",
+    "orchestrator:complete",  # handled by fallback → orchestrator_complete
+    "prompt:submit",  # handled by fallback → prompt_submit
 ]
 
 _BASE64_PLACEHOLDER = "[image data omitted]"

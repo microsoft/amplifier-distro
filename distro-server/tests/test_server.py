@@ -260,6 +260,93 @@ class TestAppsEndpoint:
     apps with their metadata. It's the discovery mechanism for interfaces.
     """
 
+
+class TestStatusEndpoint:
+    """Verify /api/status exists and returns preflight status in UI contract format."""
+
+    def test_status_returns_contract_keys(self, monkeypatch):
+        from amplifier_distro.doctor import CheckStatus, DiagnosticCheck, DoctorReport
+
+        server = DistroServer()
+        client = TestClient(server.app)
+
+        monkeypatch.setattr(
+            "amplifier_distro.server.stub.is_stub_mode",
+            lambda: False,
+        )
+
+        report = DoctorReport(
+            checks=[
+                DiagnosticCheck(name="ok-check", status=CheckStatus.ok, message="ok"),
+                DiagnosticCheck(
+                    name="warn-check", status=CheckStatus.warning, message="warn"
+                ),
+            ]
+        )
+        monkeypatch.setattr(
+            "amplifier_distro.server.app.run_diagnostics",
+            lambda *args, **kwargs: report,
+        )
+
+        resp = client.get("/api/status")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert "passed" in data
+        assert "checks" in data
+        assert data["passed"] is True  # warnings do not fail preflight
+
+        assert data["checks"] == [
+            {
+                "name": "ok-check",
+                "passed": True,
+                "message": "ok",
+                "severity": "info",
+            },
+            {
+                "name": "warn-check",
+                "passed": False,
+                "message": "warn",
+                "severity": "warning",
+            },
+        ]
+
+    def test_status_failed_when_any_check_error(self, monkeypatch):
+        from amplifier_distro.doctor import CheckStatus, DiagnosticCheck, DoctorReport
+
+        server = DistroServer()
+        client = TestClient(server.app)
+
+        monkeypatch.setattr(
+            "amplifier_distro.server.stub.is_stub_mode",
+            lambda: False,
+        )
+
+        report = DoctorReport(
+            checks=[
+                DiagnosticCheck(name="ok-check", status=CheckStatus.ok, message="ok"),
+                DiagnosticCheck(
+                    name="error-check", status=CheckStatus.error, message="bad"
+                ),
+            ]
+        )
+        monkeypatch.setattr(
+            "amplifier_distro.server.app.run_diagnostics",
+            lambda *args, **kwargs: report,
+        )
+
+        resp = client.get("/api/status")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["passed"] is False
+        assert data["checks"][1] == {
+            "name": "error-check",
+            "passed": False,
+            "message": "bad",
+            "severity": "error",
+        }
+
     def test_apps_empty_by_default(self):
         server = DistroServer()
         client = TestClient(server.app)

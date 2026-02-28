@@ -1,10 +1,10 @@
 """amp-distro CLI - Amplifier Experience Server management tool.
 
 Manages the experience server (web chat, Slack, voice), backup/restore,
-and platform service registration. Core CLI functionality (init, doctor,
-sessions) lives in the amplifier CLI itself.
+platform service registration, and diagnostics.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -137,6 +137,81 @@ def restore_cmd(name: str) -> None:
     else:
         click.echo(f"Restore failed: {result.message}", err=True)
         sys.exit(1)
+
+
+# -- Doctor command ------------------------------------------------------
+
+
+@main.command("doctor")
+@click.option("--fix", is_flag=True, help="Auto-fix issues that can be resolved.")
+@click.option("--json", "as_json", is_flag=True, help="Output machine-readable JSON.")
+def doctor_cmd(fix: bool, as_json: bool) -> None:
+    """Diagnose and auto-fix common problems.
+
+    Runs a comprehensive suite of checks against the local Amplifier
+    installation.  Use --fix to automatically resolve fixable issues
+    (missing directories, wrong permissions, stale PID files).
+    """
+    from .doctor import run_diagnostics, run_fixes
+
+    amplifier_home = Path(conventions.AMPLIFIER_HOME).expanduser()
+    report = run_diagnostics(amplifier_home)
+
+    # Apply fixes if requested
+    fixes_applied: list[str] = []
+    if fix:
+        fixes_applied = run_fixes(amplifier_home, report)
+        # Re-run diagnostics to show updated state
+        if fixes_applied:
+            report = run_diagnostics(amplifier_home)
+
+    if as_json:
+        _print_doctor_json(report, fixes_applied)
+    else:
+        _print_doctor_report(report, fixes_applied)
+
+    # Exit non-zero if any errors remain
+    if report.summary["error"] > 0:
+        sys.exit(1)
+
+
+def _print_doctor_report(report: object, fixes: list[str]) -> None:
+    """Format and print a doctor report with coloured status markers."""
+    click.echo("Amplifier Distro - Doctor\n")
+
+    for check in report.checks:  # type: ignore[union-attr]
+        if check.status == "ok":
+            mark = click.style("\u2714", fg="green")  # checkmark
+        elif check.status == "warning":
+            mark = click.style("!", fg="yellow")
+        else:
+            mark = click.style("\u2718", fg="red")  # X
+
+        click.echo(f"  {mark} {check.name}: {check.message}")
+
+        # Show fix suggestion for non-ok checks that have a fix
+        if check.status != "ok" and check.fix_available:
+            click.echo(click.style(f"    fix: {check.fix_description}", fg="cyan"))
+
+    # Summary
+    s = report.summary  # type: ignore[union-attr]
+    click.echo(f"\n  {s['ok']} ok, {s['warning']} warning(s), {s['error']} error(s)")
+
+    if fixes:
+        click.echo("\nFixes applied:")
+        checkmark = click.style("\u2714", fg="green")
+        for f in fixes:
+            click.echo(f"  {checkmark} {f}")
+
+
+def _print_doctor_json(report: object, fixes: list[str]) -> None:
+    """Print the doctor report as machine-readable JSON."""
+    data = {
+        "checks": [c.model_dump() for c in report.checks],  # type: ignore[union-attr]
+        "summary": report.summary,  # type: ignore[union-attr]
+        "fixes_applied": fixes,
+    }
+    click.echo(json.dumps(data, indent=2))
 
 
 # -- Service commands ----------------------------------------------------
