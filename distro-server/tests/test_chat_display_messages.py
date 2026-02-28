@@ -66,7 +66,8 @@ class TestDisplayMessageQueueWiring:
 
     @pytest.mark.asyncio
     async def test_no_queue_skips_display_wiring(self):
-        """Without event_queue, coordinator.set is not called."""
+        """Without event_queue, headless_surface wires display via LogDisplaySystem."""
+        from amplifier_distro.server.protocol_adapters import LogDisplaySystem
         from amplifier_distro.server.session_backend import FoundationBackend
 
         mock_session = MagicMock()
@@ -90,7 +91,11 @@ class TestDisplayMessageQueueWiring:
         backend._approval_systems = {}
 
         with patch("asyncio.create_task"):
-            await backend.create_session(working_dir="~")  # no event_queue
+            # no event_queue — headless_surface is used
+            await backend.create_session(working_dir="~")
 
-        # coordinator.set should NOT have been called
-        mock_session.coordinator.set.assert_not_called()
+        # headless_surface wires LogDisplaySystem — coordinator.set('display') IS called
+        set_calls = mock_session.coordinator.set.call_args_list
+        display_calls = [c for c in set_calls if c.args[0] == "display"]
+        assert len(display_calls) > 0, "coordinator.set('display', ...) not called"
+        assert isinstance(display_calls[0].args[1], LogDisplaySystem)

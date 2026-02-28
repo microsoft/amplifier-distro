@@ -710,7 +710,7 @@ class TestFoundationBackendEventQueueWiring:
     async def test_create_session_without_queue_no_approval_system(
         self, bridge_backend
     ):
-        """Without event_queue, no ApprovalSystem is created."""
+        """Without event_queue, headless_surface creates an ApprovalSystem."""
         mock_session = MagicMock()
         mock_session.session_id = "sess-eq-002"
         mock_session.project_id = "test-project"
@@ -723,7 +723,7 @@ class TestFoundationBackendEventQueueWiring:
 
         await FoundationBackend.create_session(bridge_backend, working_dir="/tmp")
 
-        assert "sess-eq-002" not in bridge_backend._approval_systems
+        assert "sess-eq-002" in bridge_backend._approval_systems
         if "sess-eq-002" in bridge_backend._worker_tasks:
             bridge_backend._worker_tasks["sess-eq-002"].cancel()
 
