@@ -191,32 +191,34 @@ class TestQueueDisplaySystem:
 
 
 class TestLogDisplaySystem:
-    def test_show_message_info_routes_to_logger(self, caplog: pytest.LogCaptureFixture):
+    async def test_show_message_info_routes_to_logger(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         from amplifier_distro.server.protocol_adapters import LogDisplaySystem
 
         display = LogDisplaySystem()
         with caplog.at_level(logging.INFO, logger="amplifier_distro.display"):
-            display.show_message("hello world", level="info", source="test-hook")
+            await display.show_message("hello world", level="info", source="test-hook")
         assert "hello world" in caplog.text
 
-    def test_show_message_warning_routes_at_warning_level(
+    async def test_show_message_warning_routes_at_warning_level(
         self, caplog: pytest.LogCaptureFixture
     ):
         from amplifier_distro.server.protocol_adapters import LogDisplaySystem
 
         display = LogDisplaySystem()
         with caplog.at_level(logging.WARNING, logger="amplifier_distro.display"):
-            display.show_message("uh oh", level="warning", source="test-hook")
+            await display.show_message("uh oh", level="warning", source="test-hook")
         assert "uh oh" in caplog.text
 
-    def test_show_message_error_routes_at_error_level(
+    async def test_show_message_error_routes_at_error_level(
         self, caplog: pytest.LogCaptureFixture
     ):
         from amplifier_distro.server.protocol_adapters import LogDisplaySystem
 
         display = LogDisplaySystem()
         with caplog.at_level(logging.ERROR, logger="amplifier_distro.display"):
-            display.show_message("kaboom", level="error", source="test-hook")
+            await display.show_message("kaboom", level="error", source="test-hook")
         assert "kaboom" in caplog.text
 
     def test_push_nesting_returns_self(self):

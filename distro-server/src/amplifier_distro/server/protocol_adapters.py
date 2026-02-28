@@ -133,7 +133,7 @@ class LogDisplaySystem:
     def __init__(self) -> None:
         self._logger = logging.getLogger("amplifier_distro.display")
 
-    def show_message(
+    async def show_message(
         self,
         message: str,
         level: Literal["info", "warning", "error"] = "info",
