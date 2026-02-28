@@ -443,8 +443,8 @@ def _status_systemd() -> ServiceResult:
         unit_content = server_unit.read_text()
         if _DEPRECATED_BINARY in unit_content:
             details.append(
-                f"WARNING: deprecated {_DEPRECATED_BINARY} binary detected in unit file. "
-                "Run 'amp-distro service uninstall' and reinstall to migrate."
+                f"WARNING: deprecated {_DEPRECATED_BINARY} binary detected in unit"
+                " file. Run 'amp-distro service uninstall' and reinstall to migrate."
             )
     else:
         details.append("Server service: not installed")
