@@ -120,3 +120,38 @@ class QueueDisplaySystem:
     @property
     def nesting_depth(self) -> int:
         return self._nesting_depth
+
+
+class LogDisplaySystem:
+    """Display system that routes messages to the Python logging framework.
+
+    Satisfies the display protocol for headless surfaces (no queue, no WebSocket).
+    All show_message() calls are forwarded to the 'amplifier_distro.display' logger.
+    push_nesting() and pop_nesting() return self (nesting is a no-op).
+    """
+
+    def __init__(self) -> None:
+        self._logger = logging.getLogger("amplifier_distro.display")
+
+    def show_message(
+        self,
+        message: str,
+        level: Literal["info", "warning", "error"] = "info",
+        source: str = "hook",
+    ) -> None:
+        log_level = {
+            "info": logging.INFO,
+            "warning": logging.WARNING,
+            "error": logging.ERROR,
+        }[level]
+        self._logger.log(log_level, "[%s] %s", source, message)
+
+    def push_nesting(self) -> LogDisplaySystem:
+        return self
+
+    def pop_nesting(self) -> LogDisplaySystem:
+        return self
+
+    @property
+    def nesting_depth(self) -> int:
+        return 0
