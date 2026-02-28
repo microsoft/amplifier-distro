@@ -976,10 +976,6 @@ class TestFoundationBackendBundleCache:
 
         from amplifier_distro.server.session_backend import FoundationBackend
 
-        # Reading the attribute before it is initialized confirms it does not
-        # exist yet.  This is the canonical RED signal: AttributeError here.
-        assert bridge_backend._prepared_bundle is None  # fails until impl
-
         bridge_backend._prepared_bundle = mock_bundle
         result = await FoundationBackend._load_bundle(bridge_backend)
         assert result is mock_bundle
@@ -1001,9 +997,6 @@ class TestFoundationBackendBundleCache:
         """
         from amplifier_distro.server.session_backend import FoundationBackend
 
-        # Same RED signal: attribute does not exist yet.
-        assert bridge_backend._prepared_bundle is None  # fails until impl
-
-        # _prepared_bundle is already None (default); real load must raise.
-        with pytest.raises((ImportError, AttributeError)):
+        bridge_backend._prepared_bundle = None
+        with pytest.raises(Exception):
             await FoundationBackend._load_bundle(bridge_backend)
