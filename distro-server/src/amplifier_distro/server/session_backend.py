@@ -22,6 +22,7 @@ from typing import Any, Protocol, runtime_checkable
 from amplifier_distro.conventions import AMPLIFIER_HOME, PROJECTS_DIR
 from amplifier_distro.features import AMPLIFIER_START_URI
 from amplifier_distro.metadata_persistence import register_metadata_hooks
+from amplifier_distro.server.protocol_adapters import SessionSurface
 from amplifier_distro.server.spawn_registration import register_spawning
 from amplifier_distro.transcript_persistence import register_transcript_hooks
 
@@ -107,7 +108,7 @@ class SessionBackend(Protocol):
         working_dir: str = "~",
         bundle_name: str | None = None,
         description: str = "",
-        event_queue: asyncio.Queue | None = None,
+        surface: SessionSurface | None = None,
     ) -> SessionInfo:
         """Create a new Amplifier session. Returns session info."""
         ...
@@ -181,7 +182,7 @@ class MockBackend:
         working_dir: str = "~",
         bundle_name: str | None = None,
         description: str = "",
-        event_queue: Any = None,
+        surface: Any = None,
     ) -> SessionInfo:
         self._session_counter += 1
         session_id = f"mock-session-{self._session_counter:04d}"
@@ -463,6 +464,7 @@ class FoundationBackend:
 
         # 2. Display system — display messages to queue
         display = QueueDisplaySystem(event_queue)
+
         if hasattr(coordinator, "set"):
             coordinator.set("display", display)
 
@@ -498,12 +500,180 @@ class FoundationBackend:
             coordinator.set("approval", approval)
         self._approval_systems[session_id] = approval
 
+    def _attach_surface(
+        self, session: Any, session_id: str, surface: SessionSurface
+    ) -> None:
+        """Attach a SessionSurface to a session, wiring event hooks and systems.
+
+        Handles both SessionSurface dataclass instances and dict-like surfaces
+        (used in testing).  Guards against double hook registration on page
+        refresh / resume: hooks are only registered once per session; subsequent
+        calls update only the display and approval systems.
+        """
+        from amplifier_distro.server.protocol_adapters import ApprovalSystem
+
+        # Support both SessionSurface objects and dict-like surfaces (tests).
+        if isinstance(surface, dict):
+            event_queue = surface.get("event_queue")
+            display_system = surface.get("display_system")
+            approval_system = surface.get("approval_system")
+        else:
+            event_queue = surface.event_queue
+            display_system = surface.display_system
+            approval_system = surface.approval_system
+
+        coordinator = session.coordinator
+
+        if event_queue is not None:
+            _q = event_queue
+
+            if session_id in self._wired_sessions:
+                # Already wired — update approval/display systems only.
+                # Don't re-register hooks.
+                if display_system is not None and hasattr(coordinator, "set"):
+                    coordinator.set("display", display_system)
+                if approval_system is None:
+                    # Create a fresh approval for the new queue connection.
+                    def _on_approval_request_rewire(
+                        request_id: str,
+                        prompt: str,
+                        options: list[str],
+                        timeout: float,
+                        default: str,
+                    ) -> None:
+                        try:
+                            _q.put_nowait(
+                                (
+                                    "approval_request",
+                                    {
+                                        "request_id": request_id,
+                                        "prompt": prompt,
+                                        "options": options,
+                                        "timeout": timeout,
+                                        "default": default,
+                                    },
+                                )
+                            )
+                        except asyncio.QueueFull:
+                            logger.warning(
+                                "Event queue full, dropping approval_request"
+                            )
+
+                    approval_system = ApprovalSystem(
+                        on_approval_request=_on_approval_request_rewire,
+                        auto_approve=False,
+                    )
+                if hasattr(coordinator, "set"):
+                    coordinator.set("approval", approval_system)
+                self._approval_systems[session_id] = approval_system
+                return
+
+            self._wired_sessions.add(session_id)
+
+            # 1. Streaming hook — all coordinator events to queue.
+            from amplifier_core.events import ALL_EVENTS
+            from amplifier_core.models import HookResult
+
+            async def on_stream(event: str, data: dict) -> HookResult:
+                try:
+                    _q.put_nowait((event, data))
+                except asyncio.QueueFull:
+                    logger.warning("Event queue full, dropping event: %s", event)
+                return HookResult(action="continue", data=data)
+
+            hooks = coordinator.hooks
+
+            registered = 0
+            failed_evts = []
+            for evt in ALL_EVENTS:
+                try:
+                    hooks.register(evt, on_stream)
+                    registered += 1
+                except Exception as exc:  # noqa: BLE001
+                    failed_evts.append((evt, exc))
+
+            # Delegate events are not in ALL_EVENTS — register explicitly.
+            for evt in [
+                "delegate:agent_spawned",
+                "delegate:agent_resumed",
+                "delegate:agent_completed",
+                "delegate:error",
+            ]:
+                try:
+                    hooks.register(evt, on_stream)
+                    registered += 1
+                except Exception as exc:  # noqa: BLE001
+                    failed_evts.append((evt, exc))
+
+            # Bridge hook — re-emit orchestrator:complete as prompt:complete.
+            async def on_orchestrator_complete(event: str, data: dict) -> HookResult:
+                await coordinator.hooks.emit(
+                    "prompt:complete", {**data, "session_id": session_id}
+                )
+                return HookResult(action="continue", data=data)
+
+            try:
+                hooks.register(
+                    "orchestrator:complete", on_orchestrator_complete, priority=50
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to register prompt:complete bridge: %s", exc)
+
+            logger.info(
+                "Event hook wiring: %d registered, %d failed for session %s",
+                registered,
+                len(failed_evts),
+                session_id,
+            )
+            if failed_evts:
+                for evt, exc in failed_evts:
+                    logger.warning("  hook registration failed [%s]: %s", evt, exc)
+
+            # Create approval from queue when surface doesn't supply one.
+            if approval_system is None:
+
+                def _on_approval_request(
+                    request_id: str,
+                    prompt: str,
+                    options: list[str],
+                    timeout: float,
+                    default: str,
+                ) -> None:
+                    try:
+                        _q.put_nowait(
+                            (
+                                "approval_request",
+                                {
+                                    "request_id": request_id,
+                                    "prompt": prompt,
+                                    "options": options,
+                                    "timeout": timeout,
+                                    "default": default,
+                                },
+                            )
+                        )
+                    except asyncio.QueueFull:
+                        logger.warning("Event queue full, dropping approval_request")
+
+                approval_system = ApprovalSystem(
+                    on_approval_request=_on_approval_request,
+                    auto_approve=False,
+                )
+
+        # Unconditionally set display_system and store approval_system.
+        if display_system is not None and hasattr(coordinator, "set"):
+            coordinator.set("display", display_system)
+        if approval_system is not None:
+            if hasattr(coordinator, "set"):
+                coordinator.set("approval", approval_system)
+            self._approval_systems[session_id] = approval_system
+
     async def create_session(
         self,
         working_dir: str = "~",
         bundle_name: str | None = None,
         description: str = "",
-        event_queue: asyncio.Queue | None = None,
+        surface: SessionSurface | None = None,
     ) -> SessionInfo:
         wd = Path(working_dir).expanduser()
 
@@ -551,10 +721,13 @@ class FoundationBackend:
             },
         )
 
+        # Attach surface (event queue, display, approval) to the session.
+        from amplifier_distro.server.protocol_adapters import (
+            headless_surface as _headless_surface,
+        )
 
-        # Wire streaming/display/approval when event_queue provided
-        if event_queue is not None:
-            self._wire_event_queue(session, session_id, event_queue)
+        _surface = surface if surface is not None else _headless_surface()
+        self._attach_surface(session, session_id, _surface)
 
         # Register session spawning capability
         register_spawning(session, prepared, session_id)
