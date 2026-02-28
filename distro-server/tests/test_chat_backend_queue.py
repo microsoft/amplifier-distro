@@ -36,6 +36,7 @@ class TestFoundationBackendQueueWiring:
         backend._ended_sessions = set()
         backend._wired_sessions = set()
         backend._approval_systems = {}
+        backend._bundle_version = ""
         return backend
 
     def _mock_session(self, session_id: str = "test-session-001") -> MagicMock:

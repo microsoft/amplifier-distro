@@ -301,7 +301,8 @@ class TestSystemdServiceFile:
     def test_service_has_execstart(self, service_path: Path) -> None:
         parser = configparser.ConfigParser()
         parser.read(str(service_path))
-        assert "amp-distro-server" in parser["Service"]["ExecStart"]
+        assert "amp-distro" in parser["Service"]["ExecStart"]
+        assert "serve" in parser["Service"]["ExecStart"]
 
 
 # ---------------------------------------------------------------------------

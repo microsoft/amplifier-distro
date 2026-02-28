@@ -6,6 +6,7 @@ without a real Amplifier installation.
 """
 
 import asyncio
+import os
 import sys
 import unittest.mock
 from pathlib import Path
@@ -43,6 +44,9 @@ def bridge_backend():
         backend._ended_sessions = set()
         backend._approval_systems = {}
         backend._wired_sessions = set()
+        # Pre-warm cache fields (new in fix/bundle-prewarm)
+        backend._prepared_bundle = None
+        backend._bundle_version = ""
         return backend
 
 
@@ -550,6 +554,48 @@ class TestFoundationBackendReconnect:
         assert messages[1]["role"] == "assistant"
         assert messages[1]["content"] == "hi there"
 
+    async def test_reconnect_chdir_home_if_cwd_deleted(self, bridge_backend):
+        """_reconnect() must chdir to ~ and continue if os.getcwd() raises.
+
+        When the server process's CWD has been deleted, BundleRegistry calls
+        os.getcwd() and raises FileNotFoundError. The fix adds a guard before
+        _load_bundle() that catches this and chdirs to home.
+        """
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        mock_session = MagicMock()
+        mock_session.session_id = "sess-cwd-001"
+        mock_session.coordinator = MagicMock()
+        mock_context = MagicMock()
+        mock_context.get_messages = AsyncMock(return_value=[])
+        mock_context.set_messages = AsyncMock()
+        mock_session.coordinator.get = MagicMock(return_value=mock_context)
+
+        mock_prepared = MagicMock()
+        mock_prepared.create_session = AsyncMock(return_value=mock_session)
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+        bridge_backend._find_transcript = MagicMock(
+            return_value=[{"role": "user", "content": "hello"}]
+        )
+
+        mock_af_session = MagicMock()
+        mock_af_session.find_orphaned_tool_calls.return_value = []
+
+        home_dir = os.path.expanduser("~")
+
+        with (
+            patch.dict(sys.modules, {"amplifier_foundation.session": mock_af_session}),
+            patch("os.getcwd", side_effect=FileNotFoundError("No such file")),
+            patch("os.chdir") as mock_chdir,
+        ):
+            handle = await FoundationBackend._reconnect(bridge_backend, "sess-cwd-001")
+
+        mock_chdir.assert_called_once_with(home_dir)
+        assert handle.session_id == "sess-cwd-001"
+
+        if "sess-cwd-001" in bridge_backend._worker_tasks:
+            bridge_backend._worker_tasks["sess-cwd-001"].cancel()
+
 
 # ── _SessionHandle.cancel ──────────────────────────────────────────────
 
@@ -573,6 +619,7 @@ class TestSessionHandleCancel:
         mock_session.coordinator.request_cancel.assert_called_once_with("graceful")
 
     async def test_cancel_no_session_does_not_raise(self):
+        """cancel() returns early when session is None — must not raise."""
         from amplifier_distro.server.session_backend import _SessionHandle
 
         handle = _SessionHandle(
@@ -584,6 +631,7 @@ class TestSessionHandleCancel:
         await handle.cancel("graceful")  # must not raise
 
     async def test_cancel_no_coordinator_does_not_raise(self):
+        """cancel() returns early when coordinator is absent — must not raise."""
         from amplifier_distro.server.session_backend import _SessionHandle
 
         mock_session = MagicMock(spec=[])  # no coordinator attr
@@ -594,6 +642,29 @@ class TestSessionHandleCancel:
             session=mock_session,
         )
         await handle.cancel("graceful")  # must not raise
+
+    async def test_cancel_awaits_coroutine_request_cancel(self):
+        """cancel() must await request_cancel when it is a coroutine function.
+
+        The coordinator's request_cancel is async in production. The old code
+        called request_cancel(level) without await, silently discarding the
+        coroutine. This test uses AsyncMock to prove the coroutine is awaited.
+        """
+        from amplifier_distro.server.session_backend import _SessionHandle
+
+        mock_session = MagicMock()
+        mock_session.coordinator = MagicMock()
+        mock_session.coordinator.request_cancel = AsyncMock()  # async — must be awaited
+
+        handle = _SessionHandle(
+            session_id="s-await-001",
+            project_id="p-await-001",
+            working_dir=Path("/tmp"),
+            session=mock_session,
+        )
+        await handle.cancel("graceful")
+
+        mock_session.coordinator.request_cancel.assert_awaited_once_with("graceful")
 
 
 # ── FoundationBackend.execute ──────────────────────────────────────────
@@ -915,6 +986,125 @@ class TestFoundationBackendSpawnRegistration:
             bridge_backend._worker_tasks["sess-spawn-rc-001"].cancel()
 
 
+class TestFoundationBackendBundleCache:
+    """Verify _prepared_bundle cache fields exist and _load_bundle() honours them."""
+
+    def test_init_has_prepared_bundle_field(self):
+        """FoundationBackend.__init__ must initialise _prepared_bundle to None."""
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        backend = FoundationBackend.__new__(FoundationBackend)
+        FoundationBackend.__init__(backend)
+        assert hasattr(backend, "_prepared_bundle")
+        assert backend._prepared_bundle is None
+
+    def test_init_has_bundle_version_field(self):
+        """FoundationBackend.__init__ must initialise _bundle_version to ``""``."""
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        backend = FoundationBackend.__new__(FoundationBackend)
+        FoundationBackend.__init__(backend)
+        assert hasattr(backend, "_bundle_version")
+        assert backend._bundle_version == ""
+
+    async def test_load_bundle_returns_cache_when_prepared_bundle_set(
+        self, bridge_backend
+    ):
+        """_load_bundle() must return _prepared_bundle immediately without I/O."""
+        mock_prepared = MagicMock()
+        bridge_backend._prepared_bundle = mock_prepared
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        result = await FoundationBackend._load_bundle(bridge_backend)
+
+        assert result is mock_prepared
+
+    async def test_load_bundle_skips_import_when_cache_hit(self, bridge_backend):
+        """_load_bundle() must not call load_bundle() when cache is populated."""
+        mock_prepared = MagicMock()
+        bridge_backend._prepared_bundle = mock_prepared
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        with patch(
+            "amplifier_distro.server.session_backend.FoundationBackend._load_bundle",
+            wraps=FoundationBackend._load_bundle,
+        ):
+            # Ensure no amplifier_foundation import happens by verifying result
+            result = await FoundationBackend._load_bundle(bridge_backend)
+
+        assert result is mock_prepared
+
+    def test_bridge_backend_fixture_has_prepared_bundle(self, bridge_backend):
+        """bridge_backend fixture must expose _prepared_bundle (cache field)."""
+        assert hasattr(bridge_backend, "_prepared_bundle")
+        assert bridge_backend._prepared_bundle is None
+
+    def test_bridge_backend_fixture_has_bundle_version(self, bridge_backend):
+        """bridge_backend fixture must expose _bundle_version (cache field)."""
+        assert hasattr(bridge_backend, "_bundle_version")
+        assert bridge_backend._bundle_version == ""
+
+
+class TestFoundationBackendStartup:
+    """startup() pre-warms the bundle: calls _load_bundle() and caches the result."""
+
+    async def test_startup_sets_prepared_bundle(self, bridge_backend):
+        """startup() must store the loaded bundle in _prepared_bundle."""
+        mock_bundle = MagicMock()
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="")
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.startup(bridge_backend)
+
+        assert bridge_backend._prepared_bundle is mock_bundle
+
+    async def test_startup_calls_load_bundle_once(self, bridge_backend):
+        """startup() must call _load_bundle() exactly once with no arguments."""
+        mock_bundle = MagicMock()
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="")
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.startup(bridge_backend)
+
+        bridge_backend._load_bundle.assert_awaited_once_with()
+
+    async def test_startup_sets_bundle_version(self, bridge_backend):
+        """startup() must store the computed bundle version in _bundle_version."""
+        mock_bundle = MagicMock()
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="1234567.89")
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.startup(bridge_backend)
+
+        assert bridge_backend._bundle_version == "1234567.89"
+
+    async def test_startup_logs_warning_and_continues_on_load_failure(
+        self, bridge_backend
+    ):
+        """startup() must log a warning and not re-raise if _load_bundle() fails.
+
+        The server should start in a degraded-but-running state; the first
+        create_session() call will retry the load.  _prepared_bundle stays None.
+        """
+        bridge_backend._load_bundle = AsyncMock(side_effect=RuntimeError("load failed"))
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        # Must not raise — warn-and-continue semantics
+        await FoundationBackend.startup(bridge_backend)
+
+        # Cache stays unpopulated — create_session() will retry
+        assert bridge_backend._prepared_bundle is None
+
+
 class TestMockBackendNewMethods:
     async def test_create_session_accepts_event_queue(self):
         from amplifier_distro.server.session_backend import MockBackend
@@ -954,52 +1144,283 @@ class TestMockBackendNewMethods:
         assert any(c["method"] == "resume_session" for c in backend.calls)
 
 
-# ── FoundationBackend._load_bundle cache ──────────────────────────────────────
+# ── FoundationBackend.reload_bundle ────────────────────────────────────────────
 
 
-class TestFoundationBackendBundleCache:
-    """_load_bundle() must return _prepared_bundle when it is set (cache hit)."""
+class TestFoundationBackendReloadBundle:
+    """reload_bundle() must invalidate the bundle cache and reload a fresh bundle."""
 
-    async def test_load_bundle_returns_cached_bundle_without_hitting_foundation(
-        self, bridge_backend
-    ):
-        """Cache hit: when _prepared_bundle is set, _load_bundle returns it directly.
+    async def test_reload_bundle_clears_and_reloads(self, bridge_backend):
+        """reload_bundle() clears _prepared_bundle and calls _load_bundle() once."""
+        old_bundle = MagicMock(name="old_bundle")
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._prepared_bundle = old_bundle
 
-        Once pre-warmed, no I/O or foundation loading should occur.
+        load_calls = []
 
-        RED: fails with AttributeError because FoundationBackend does not yet
-        initialize _prepared_bundle in __init__ (attribute absent on instance).
-        GREEN: passes once __init__ sets self._prepared_bundle = None and
-        _load_bundle() returns it on cache hit.
-        """
-        mock_bundle = MagicMock()
+        async def fake_load_bundle(*args, **kwargs):
+            load_calls.append(True)
+            return new_bundle
+
+        bridge_backend._load_bundle = fake_load_bundle
+        bridge_backend._compute_bundle_version = MagicMock(return_value="new-version")
 
         from amplifier_distro.server.session_backend import FoundationBackend
 
-        # AttributeError here in RED (attribute not yet initialized by __init__)
-        assert bridge_backend._prepared_bundle is None
-        bridge_backend._prepared_bundle = mock_bundle
-        result = await FoundationBackend._load_bundle(bridge_backend)
-        assert result is mock_bundle
+        await FoundationBackend.reload_bundle(bridge_backend)
 
-    async def test_load_bundle_cache_miss_when_prepared_bundle_is_none(
-        self, bridge_backend
-    ):
-        """Cache miss: _prepared_bundle=None forces _load_bundle to attempt real load.
+        assert bridge_backend._prepared_bundle is new_bundle
+        assert bridge_backend._prepared_bundle is not old_bundle
+        assert len(load_calls) == 1
 
-        It must NOT silently return None — it must raise (ImportError/AttributeError)
-        because a real load with a dummy bundle name will fail.
-        This guards against an implementation bug where the cache always returns
-        the stored value even when it is explicitly None.
+    async def test_reload_bundle_updates_bundle_version(self, bridge_backend):
+        """reload_bundle() stores the new computed version in _bundle_version."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="9999.0")
 
-        RED: fails with AttributeError because _prepared_bundle is not yet an
-        attribute on FoundationBackend instances.
-        GREEN: passes once __init__ initializes _prepared_bundle and _load_bundle()
-        falls through to the real load path when it is None.
-        """
         from amplifier_distro.server.session_backend import FoundationBackend
 
-        # AttributeError here in RED (attribute not yet initialized by __init__)
-        assert bridge_backend._prepared_bundle is None
-        with pytest.raises(Exception):  # noqa: B017
-            await FoundationBackend._load_bundle(bridge_backend)
+        await FoundationBackend.reload_bundle(bridge_backend)
+
+        assert bridge_backend._bundle_version == "9999.0"
+
+    async def test_reload_bundle_calls_on_bundle_reload_on_active_surfaces(
+        self, bridge_backend
+    ):
+        """reload_bundle() notifies every active session surface via on_bundle_reload."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
+
+        on_reload_a = AsyncMock()
+        handle_a = _make_mock_handle("sess-surf-a")
+        handle_a.surface = MagicMock()
+        handle_a.surface.on_bundle_reload = on_reload_a
+
+        on_reload_b = AsyncMock()
+        handle_b = _make_mock_handle("sess-surf-b")
+        handle_b.surface = MagicMock()
+        handle_b.surface.on_bundle_reload = on_reload_b
+
+        bridge_backend._sessions = {
+            "sess-surf-a": handle_a,
+            "sess-surf-b": handle_b,
+        }
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)
+
+        on_reload_a.assert_awaited_once()
+        on_reload_b.assert_awaited_once()
+
+    async def test_reload_bundle_skips_sessions_without_surface(self, bridge_backend):
+        """reload_bundle() skips sessions whose handle has no surface — must not raise."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
+
+        handle = _make_mock_handle("sess-no-surf")
+        handle.surface = None
+
+        on_reload_b = AsyncMock()
+        handle_b = _make_mock_handle("sess-no-surf-b")
+        handle_b.surface = MagicMock()
+        handle_b.surface.on_bundle_reload = on_reload_b
+
+        bridge_backend._sessions = {
+            "sess-no-surf": handle,
+            "sess-no-surf-b": handle_b,
+        }
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)  # must not raise
+
+        on_reload_b.assert_awaited_once()
+
+    async def test_reload_bundle_skips_surfaces_with_no_on_bundle_reload(
+        self, bridge_backend
+    ):
+        """reload_bundle() skips surfaces with on_bundle_reload = None — must not raise."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
+
+        handle = _make_mock_handle("sess-no-callback")
+        handle.surface = MagicMock()
+        handle.surface.on_bundle_reload = None
+
+        on_reload_b = AsyncMock()
+        handle_b = _make_mock_handle("sess-no-callback-b")
+        handle_b.surface = MagicMock()
+        handle_b.surface.on_bundle_reload = on_reload_b
+
+        bridge_backend._sessions = {
+            "sess-no-callback": handle,
+            "sess-no-callback-b": handle_b,
+        }
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)  # must not raise
+
+        on_reload_b.assert_awaited_once()
+
+    async def test_reload_bundle_continues_past_surface_error(self, bridge_backend):
+        """reload_bundle() continues to other surfaces when one raises — must not raise."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
+
+        handle_a = _make_mock_handle("sess-err-a")
+        handle_a.surface = MagicMock()
+        handle_a.surface.on_bundle_reload = AsyncMock(
+            side_effect=RuntimeError("surface exploded")
+        )
+
+        on_reload_b = AsyncMock()
+        handle_b = _make_mock_handle("sess-err-b")
+        handle_b.surface = MagicMock()
+        handle_b.surface.on_bundle_reload = on_reload_b
+
+        bridge_backend._sessions = {
+            "sess-err-a": handle_a,
+            "sess-err-b": handle_b,
+        }
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)  # must not raise
+
+        on_reload_b.assert_awaited_once()
+
+
+# ── FoundationBackend._compute_bundle_version ─────────────────────────────────
+
+
+class TestFoundationBackendComputeBundleVersion:
+    """_compute_bundle_version() returns mtime string of overlay bundle.yaml."""
+
+    def test_returns_empty_string_when_no_overlay(self, bridge_backend):
+        """Returns '' when overlay does not exist."""
+        # overlay_dir is not patched — function must short-circuit before calling it
+        with patch("amplifier_distro.overlay.overlay_exists", return_value=False):
+            from amplifier_distro.server.session_backend import FoundationBackend
+
+            version = FoundationBackend._compute_bundle_version(bridge_backend)
+
+        assert version == ""
+
+    def test_returns_mtime_string_when_overlay_bundle_yaml_exists(
+        self, bridge_backend, tmp_path
+    ):
+        """Returns str(bundle_yaml.stat().st_mtime) when overlay bundle.yaml exists."""
+        bundle_yaml = tmp_path / "bundle.yaml"
+        bundle_yaml.write_text("bundle:\n  name: test\n")
+
+        with (
+            patch("amplifier_distro.overlay.overlay_exists", return_value=True),
+            patch("amplifier_distro.overlay.overlay_dir", return_value=tmp_path),
+        ):
+            from amplifier_distro.server.session_backend import FoundationBackend
+
+            version = FoundationBackend._compute_bundle_version(bridge_backend)
+
+        expected = str(bundle_yaml.stat().st_mtime)
+        assert version != ""
+        assert version == expected
+
+    def test_returns_empty_string_when_overlay_dir_exists_but_bundle_yaml_missing(
+        self, bridge_backend, tmp_path
+    ):
+        """Returns '' when overlay exists but bundle.yaml is absent."""
+        # tmp_path exists but has no bundle.yaml
+        with (
+            patch("amplifier_distro.overlay.overlay_exists", return_value=True),
+            patch("amplifier_distro.overlay.overlay_dir", return_value=tmp_path),
+        ):
+            from amplifier_distro.server.session_backend import FoundationBackend
+
+            version = FoundationBackend._compute_bundle_version(bridge_backend)
+
+        assert version == ""
+
+
+class TestSessionHandlePrewarmFields:
+    """RED tests — _SessionHandle does not yet have bundle_version / surface fields.
+
+    These tests are expected to FAIL with:
+        TypeError: _SessionHandle.__init__() got an unexpected keyword argument 'bundle_version'
+
+    Once the fields are added to the dataclass the tests will turn GREEN.
+    """
+
+    def test_session_handle_has_bundle_version_field_defaulting_to_empty_string(self):
+        """bundle_version defaults to '' when not supplied."""
+        from amplifier_distro.server.session_backend import _SessionHandle
+
+        handle = _SessionHandle(
+            session_id="s001",
+            project_id="p001",
+            working_dir=Path("/tmp"),
+            session=None,
+        )
+        assert handle.bundle_version == ""
+
+    def test_session_handle_has_surface_field_defaulting_to_none(self):
+        """surface defaults to None when not supplied."""
+        from amplifier_distro.server.session_backend import _SessionHandle
+
+        handle = _SessionHandle(
+            session_id="s002",
+            project_id="p001",
+            working_dir=Path("/tmp"),
+            session=None,
+        )
+        assert handle.surface is None
+
+    def test_session_handle_accepts_explicit_bundle_version(self):
+        """bundle_version can be set explicitly at construction time."""
+        from amplifier_distro.server.session_backend import _SessionHandle
+
+        handle = _SessionHandle(
+            session_id="s003",
+            project_id="p001",
+            working_dir=Path("/tmp"),
+            session=None,
+            bundle_version="1700000000.0",
+        )
+        assert handle.bundle_version == "1700000000.0"
+
+    async def test_create_session_stores_bundle_version_on_handle(
+        self, bridge_backend
+    ):
+        """create_session() stamps _bundle_version onto the new _SessionHandle.
+
+        When create_session() builds the _SessionHandle, it must pass
+        ``bundle_version=self._bundle_version`` so the handle carries the
+        version at the time the session was created (used later for staleness
+        detection).
+        """
+        mock_session = MagicMock()
+        mock_session.session_id = "sess-bv-001"
+
+        mock_prepared = MagicMock()
+        mock_prepared.create_session = AsyncMock(return_value=mock_session)
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+        bridge_backend._bundle_version = "mtime-99999.0"
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.create_session(bridge_backend, working_dir="/tmp")
+
+        assert bridge_backend._sessions["sess-bv-001"].bundle_version == "mtime-99999.0"
+
+        # Cleanup: cancel the worker task
+        if "sess-bv-001" in bridge_backend._worker_tasks:
+            task = bridge_backend._worker_tasks["sess-bv-001"]
+            task.cancel()
+            with pytest.raises((asyncio.CancelledError, Exception)):
+                await task

@@ -46,7 +46,7 @@ class VoiceDisplaySystem:
 
     def __init__(self, message_callback: MessageCallback | None = None) -> None:
         self._callback = message_callback
-        self.suppressed_patterns: list[str] = ["debug:", "trace:", "[internal]"]
+        self._suppressed_patterns: list[str] = ["debug:", "trace:", "[internal]"]
 
     async def display(
         self,
@@ -87,7 +87,9 @@ class VoiceDisplaySystem:
         if len(message) < 3:
             return False
         lower = message.lower()
-        return not any(pattern.lower() in lower for pattern in self.suppressed_patterns)
+        return not any(
+            pattern.lower() in lower for pattern in self._suppressed_patterns
+        )
 
     def _to_spoken_format(self, message: str, level: DisplayLevel) -> str:
         """Convert a display message to a speech-friendly format."""
@@ -143,4 +145,4 @@ class VoiceDisplaySystem:
 
     def add_suppressed_pattern(self, pattern: str) -> None:
         """Add a pattern to the suppressed patterns list."""
-        self.suppressed_patterns.append(pattern)
+        self._suppressed_patterns.append(pattern)

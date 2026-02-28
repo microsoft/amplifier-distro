@@ -139,3 +139,20 @@ async def stop_services() -> None:
     backend = instance.backend
     if hasattr(backend, "stop"):
         await backend.stop()
+
+
+async def start_services() -> None:
+    """Pre-warm the backend bundle at server startup.
+    Called during FastAPI startup (wired in app.py via add_event_handler).
+    Safe to call even if services haven't been initialized or if the backend
+    doesn't implement startup() (e.g., MockBackend in dev mode).
+    """
+    with _instance_lock:
+        instance = _instance
+
+    if instance is None:
+        return
+
+    backend = instance.backend
+    if hasattr(backend, "startup"):
+        await backend.startup()

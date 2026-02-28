@@ -16,6 +16,11 @@ hooks:
     config:
       enabled: true
       blocking: false
+  - module: hooks-session-naming
+    source: git+https://github.com/microsoft/amplifier-foundation@main#subdirectory=modules/hooks-session-naming
+    config:
+      initial_trigger_turn: 2
+      update_interval_turns: 5
 
 agents:
   include:

@@ -5,6 +5,9 @@ description = "Session handoff hook - generates summary at session end for cross
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+test = ["pytest>=8.0", "pytest-asyncio>=0.21"]
+
 [project.entry-points."amplifier.modules"]
 hooks-handoff = "amplifier_module_hooks_handoff:mount"
 
@@ -14,3 +17,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["amplifier_module_hooks_handoff"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

@@ -582,3 +582,47 @@ class TestSessionBackendContract:
         active = backend.list_active_sessions()
         active_ids = [s.session_id for s in active]
         assert info.session_id not in active_ids
+
+
+# ---------------------------------------------------------------------------
+# start_services() — FastAPI startup hook (#task-13)
+# ---------------------------------------------------------------------------
+
+
+class TestStartServices:
+    """Verify start_services() calls backend.startup() at server startup."""
+
+    @pytest.mark.asyncio
+    async def test_start_services_calls_backend_startup(self):
+        """start_services() awaits backend.startup() when it exists."""
+        from unittest.mock import AsyncMock
+
+        from amplifier_distro.server.services import start_services
+
+        mock_backend = AsyncMock()
+        mock_backend.startup = AsyncMock()
+
+        reset_services()
+        init_services(backend=mock_backend)
+        await start_services()
+
+        mock_backend.startup.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_start_services_safe_without_startup_method(self):
+        """start_services() must not raise when backend has no startup()."""
+        from amplifier_distro.server.services import start_services
+
+        reset_services()
+        init_services(backend=MockBackend())
+        # MockBackend has no startup() — should silently do nothing
+        await start_services()
+
+    @pytest.mark.asyncio
+    async def test_start_services_safe_before_init(self):
+        """start_services() silently does nothing when services not initialized."""
+        from amplifier_distro.server.services import start_services
+
+        reset_services()
+        # No init_services() call — must not raise
+        await start_services()

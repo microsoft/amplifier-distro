@@ -2262,3 +2262,161 @@ class TestZombieSessionFix:
         # Response should be the generic error
         assert response is not None
         assert "Error" in response
+
+
+# --- Aiohttp Session Cleanup Tests ---
+
+
+class TestAiohttpSessionCleanup:
+    """Tests for module-level aiohttp session lifecycle (Issue 4).
+
+    The production code must:
+    1. Expose a module-level ``_slack_aiohttp_session`` variable (initially None).
+    2. In ``on_shutdown()``, close the session if it is open, then set it to None.
+    3. Allow ``SocketModeAdapter`` to accept an injected ``session=`` argument so
+       tests (and production callers) can control the aiohttp session lifecycle.
+    """
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _initialized_state(self):
+        """Return the slack app module after initialization.
+
+        Also asserts that the module exposes ``_slack_aiohttp_session = None``
+        immediately after initialization (RED: fails until the attribute is added).
+        """
+        import amplifier_distro.server.apps.slack as slack_app
+        from amplifier_distro.server.apps.slack import _state, initialize
+        from amplifier_distro.server.apps.slack.config import SlackConfig
+
+        _state.clear()
+        config = SlackConfig(
+            hub_channel_id="C_HUB",
+            hub_channel_name="amplifier",
+            simulator_mode=True,
+            bot_name="amp",
+        )
+        initialize(config=config)
+        # Module must expose the session variable, initialised to None.
+        # AttributeError here → the implementation is missing the attribute.
+        assert slack_app._slack_aiohttp_session is None
+        return slack_app
+
+    # ------------------------------------------------------------------
+    # on_shutdown() session-lifecycle tests
+    # ------------------------------------------------------------------
+
+    async def test_on_shutdown_closes_open_module_session(self):
+        """on_shutdown() must close the module-level session when it is open."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        slack_app = self._initialized_state()
+
+        mock_session = MagicMock()
+        mock_session.closed = False
+        mock_session.close = AsyncMock()
+
+        slack_app._slack_aiohttp_session = mock_session
+
+        await slack_app.on_shutdown()
+
+        mock_session.close.assert_called_once()
+        assert slack_app._slack_aiohttp_session is None
+
+    async def test_on_shutdown_does_not_double_close_already_closed_session(self):
+        """on_shutdown() must not call close() on an already-closed session."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        slack_app = self._initialized_state()
+
+        mock_session = MagicMock()
+        mock_session.closed = True
+        mock_session.close = AsyncMock()
+
+        slack_app._slack_aiohttp_session = mock_session
+
+        await slack_app.on_shutdown()
+
+        mock_session.close.assert_not_called()
+        assert slack_app._slack_aiohttp_session is None
+
+    async def test_on_shutdown_with_no_session_does_not_crash(self):
+        """on_shutdown() must not crash when _slack_aiohttp_session is None."""
+        slack_app = self._initialized_state()
+        slack_app._slack_aiohttp_session = None
+
+        await slack_app.on_shutdown()  # must not raise
+
+        assert slack_app._slack_aiohttp_session is None
+
+    # ------------------------------------------------------------------
+    # SocketModeAdapter injected-session tests
+    # ------------------------------------------------------------------
+
+    async def test_socket_mode_adapter_uses_injected_session(self):
+        """SocketModeAdapter must call ws_connect on the injected session."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from amplifier_distro.server.apps.slack.config import SlackConfig
+        from amplifier_distro.server.apps.slack.socket_mode import SocketModeAdapter
+
+        config = SlackConfig(
+            hub_channel_id="C_HUB",
+            hub_channel_name="amplifier",
+            simulator_mode=True,
+            bot_name="amp",
+            app_token="xapp-test",
+            bot_token="xoxb-test",
+        )
+        event_handler = MagicMock()
+
+        mock_ws = MagicMock()
+        mock_ws.closed = False
+        mock_ws.close = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.ws_connect = AsyncMock(return_value=mock_ws)
+
+        # TypeError here → SocketModeAdapter.__init__ doesn't accept session= yet
+        adapter = SocketModeAdapter(config, event_handler, session=mock_session)
+
+        async def _stop_after_one_frame():
+            adapter._running = False
+
+        with (
+            patch.object(adapter, "_get_ws_url", AsyncMock(return_value="wss://fake")),
+            patch.object(adapter, "_process_frames", _stop_after_one_frame),
+            patch.object(adapter, "_resolve_bot_id", AsyncMock(return_value="U_BOT")),
+        ):
+            adapter._running = True
+            await adapter._connection_loop()
+
+        mock_session.ws_connect.assert_called_once_with("wss://fake")
+
+    async def test_socket_mode_adapter_does_not_close_injected_session(self):
+        """_close_ws() must leave the injected session open (caller owns it)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from amplifier_distro.server.apps.slack.config import SlackConfig
+        from amplifier_distro.server.apps.slack.socket_mode import SocketModeAdapter
+
+        config = SlackConfig(
+            hub_channel_id="C_HUB",
+            hub_channel_name="amplifier",
+            simulator_mode=True,
+            bot_name="amp",
+        )
+        event_handler = MagicMock()
+
+        mock_session = MagicMock()
+        mock_session.closed = False
+        mock_session.close = AsyncMock()
+
+        # TypeError here → SocketModeAdapter.__init__ doesn't accept session= yet
+        adapter = SocketModeAdapter(config, event_handler, session=mock_session)
+
+        await adapter._close_ws()
+
+        mock_session.close.assert_not_called()
+        assert adapter._session is None

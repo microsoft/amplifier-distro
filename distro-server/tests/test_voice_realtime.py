@@ -130,6 +130,49 @@ class TestCreateClientSecret:
         assert payload["session"]["type"] == "realtime"
 
     @pytest.mark.asyncio
+    async def test_payload_excludes_input_audio_transcription(self) -> None:
+        """create_client_secret payload must NOT include input_audio_transcription.
+
+        OpenAI's /client_secrets endpoint returns 400 if input_audio_transcription
+        is included. Transcription config must be sent via session.update after
+        the data channel opens (already done in static/index.html).
+        """
+        from amplifier_distro.server.apps.voice.realtime import (
+            VoiceConfig,
+            create_client_secret,
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.is_error = False
+        mock_response.json.return_value = {"value": "ek_tok"}
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        config = VoiceConfig(
+            model="gpt-4o-realtime-preview",
+            voice="ash",
+            instructions="Be helpful.",
+            openai_api_key="sk-test",
+        )
+
+        with patch(
+            "amplifier_distro.server.apps.voice.realtime.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            await create_client_secret(config)
+
+        call_kwargs = mock_client.post.call_args[1]
+        payload = call_kwargs["json"]
+        assert "input_audio_transcription" not in payload["session"], (
+            "input_audio_transcription must not be sent at client_secret creation "
+            "time — OpenAI returns 400. Send it via session.update on dc.onopen."
+        )
+
+    @pytest.mark.asyncio
     async def test_raises_http_exception_on_401(self) -> None:
         """create_client_secret raises HTTPException(401) when OpenAI returns 401."""
         from amplifier_distro.server.apps.voice.realtime import (

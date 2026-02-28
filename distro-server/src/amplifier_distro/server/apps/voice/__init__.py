@@ -11,6 +11,7 @@ Architecture:
     Backend (this module):
         GET  /                          - Voice UI static/index.html
         GET  /static/vendor.js          - Bundled vendor JS
+        GET  /static/connection-health.mjs - ConnectionHealthManager class
         GET  /api/status                - Voice service status
         GET  /session        (auth)     - GA ephemeral client_secret token
         POST /sdp                       - WebRTC SDP offer/answer exchange
@@ -75,42 +76,6 @@ _repo_override: Any = None
 # ---------------------------------------------------------------------------
 
 _VALID_SESSION_ID = re.compile(r"^[a-zA-Z0-9_\-]+$")
-
-# ---------------------------------------------------------------------------
-# VOICE_TOOLS
-# ---------------------------------------------------------------------------
-
-VOICE_TOOLS: list[dict[str, Any]] = [
-    {
-        "name": "delegate",
-        "description": "Delegate a task to the Amplifier agent with the given instruction.",  # noqa: E501
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "instruction": {
-                    "type": "string",
-                    "description": "The instruction to pass to Amplifier.",
-                }
-            },
-            "required": ["instruction"],
-        },
-    },
-    {
-        "name": "cancel_current_task",
-        "description": "Cancel the currently running Amplifier task.",
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "pause_replies",
-        "description": "Pause assistant replies until resume_replies is called.",
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "resume_replies",
-        "description": "Resume assistant replies after pause_replies.",
-        "parameters": {"type": "object", "properties": {}},
-    },
-]
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -216,6 +181,22 @@ async def vendor_js():
         )
     return PlainTextResponse(
         content="// vendor.js not built yet - run npm run build",
+        status_code=404,
+    )
+
+
+@router.get("/static/connection-health.mjs", response_model=None)
+async def connection_health_mjs():
+    """Serve connection-health.mjs (ConnectionHealthManager class)."""
+    mjs_path = Path(__file__).parent / "static" / "connection-health.mjs"
+    if mjs_path.exists():
+        from fastapi.responses import Response
+
+        return Response(
+            content=mjs_path.read_bytes(), media_type="application/javascript"
+        )
+    return PlainTextResponse(
+        content="// connection-health.mjs not found",
         status_code=404,
     )
 
@@ -403,7 +384,20 @@ async def create_session(
     repo.create_conversation(conv)
 
     _active_connection = conn
-    logger.info("Voice session created: %s", session_id)
+
+    # Write Amplifier session stub so the chat app can discover this session
+    # immediately.
+    # The stub is an empty transcript.jsonl at the standard Amplifier path —
+    # scan_sessions() finds it by checking for this file's existence.
+    if conn.project_id:
+        repo.write_to_amplifier_transcript(session_id, conn.project_id, [])
+        conv_for_meta = repo.get_conversation(session_id)
+        if conv_for_meta is not None:
+            repo.write_amplifier_metadata(session_id, conn.project_id, conv_for_meta)
+
+    logger.info(
+        "Voice session created: %s (project_id=%s)", session_id, conn.project_id
+    )
     return JSONResponse(content={"session_id": session_id})
 
 
@@ -422,10 +416,15 @@ async def resume_session(
     backend = _get_backend()
     repo = _get_repo()
 
-    # Reconnect backend (restores session state)
-    await backend.reconnect(session_id)
+    # Verify the session exists and retrieve its working_dir
+    session_info = await backend.get_session_info(session_id)
+    if session_info is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Session {session_id} not found or has expired"},
+        )
 
-    # Pull transcript context for the Realtime API
+    # Pull transcript context for the Realtime API before resuming
     context = repo.get_resumption_context(session_id)
 
     # Obtain a fresh ephemeral token
@@ -445,11 +444,21 @@ async def resume_session(
         )
         client_secret = await rt.create_client_secret(config)
 
-    # Recreate the VoiceConnection with a fresh queue
+    # Create a fresh VoiceConnection (new event_queue for SSE streaming).
+    # For resume we reuse the existing session_id — do NOT call conn.create(),
+    # which would start a brand-new Amplifier session instead of restoring this one.
     conn = VoiceConnection(repository=repo, backend=backend)
-    workspace_root = str(_get_workspace_root())
-    await conn.create(workspace_root)
+    conn._session_id = session_id  # reuse existing session
+    conn._project_id = session_info.project_id or None
     _active_connection = conn
+
+    # Resume the backend session: restores LLM context and wires the new event_queue
+    # into the session's hook pipeline so SSE streaming continues on this connection.
+    await backend.resume_session(
+        session_info.session_id,
+        session_info.working_dir,
+        event_queue=conn.event_queue,
+    )
 
     logger.info("Voice session resumed: %s", session_id)
     return JSONResponse(
@@ -475,6 +484,12 @@ async def sync_transcript(
     except Exception:  # noqa: BLE001
         return JSONResponse(status_code=400, content={"error": "Invalid JSON body"})
 
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Body must be a JSON object with an 'entries' key"},
+        )
+
     entries_data: list[dict[str, Any]] = body.get("entries", [])
     repo = _get_repo()
     now = datetime.now(UTC)
@@ -493,6 +508,12 @@ async def sync_transcript(
         for e in entries_data
     ]
     repo.add_entries(session_id, entries)
+
+    # Mirror user/assistant turns to the Amplifier transcript so the chat app
+    # can display voice sessions alongside regular Amplifier sessions.
+    conn = _active_connection
+    if conn is not None and conn.project_id:
+        repo.write_to_amplifier_transcript(session_id, conn.project_id, entries)
 
     return JSONResponse(content={"synced": len(entries)})
 
@@ -514,12 +535,20 @@ async def end_session(
     except Exception:  # noqa: BLE001
         body = {}
 
-    reason: str = body.get("reason", "user_ended")
+    _VALID_REASONS = {
+        "session_limit",
+        "network_error",
+        "user_ended",
+        "idle_timeout",
+        "error",
+    }
+    raw_reason: str = body.get("reason", "user_ended")
+    reason = raw_reason if raw_reason in _VALID_REASONS else "error"
     backend = _get_backend()
     repo = _get_repo()
 
     await backend.end_session(session_id)
-    repo.end_conversation(session_id, reason)
+    repo.end_conversation(session_id, reason)  # type: ignore[arg-type]
     _active_connection = None
 
     logger.info("Voice session ended: %s (reason=%s)", session_id, reason)
@@ -536,6 +565,29 @@ async def list_sessions(
     return JSONResponse(content=repo.list_conversations())
 
 
+# NOTE: /sessions/stats MUST be declared before /sessions/{session_id}.
+# FastAPI resolves routes in declaration order; placing a literal path segment
+# after a path parameter causes FastAPI to match "stats" as a session_id value.
+@router.get("/sessions/stats")
+async def sessions_stats(
+    x_api_key: str | None = Header(default=None),
+) -> JSONResponse:
+    """Return aggregate statistics across all voice sessions."""
+    await _require_api_key(x_api_key)
+    repo = _get_repo()
+    conversations = repo.list_conversations()
+    by_status: dict[str, int] = {}
+    for conv in conversations:
+        status = conv.get("status", "unknown")
+        by_status[status] = by_status.get(status, 0) + 1
+    return JSONResponse(
+        content={
+            "total": len(conversations),
+            "by_status": by_status,
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # Routes: tool execution
 # ---------------------------------------------------------------------------
@@ -546,12 +598,11 @@ async def execute_tool(
     request: Request,
     x_api_key: str | None = Header(default=None),
 ) -> JSONResponse:
-    """Execute a VOICE_TOOL on behalf of the active voice session.
+    """Execute a voice tool on behalf of the active voice session.
 
     Supported tools:
-      - delegate: run instruction via backend.execute()
+      - delegate: run instruction via backend.send_message(), returns actual result
       - cancel_current_task: cancel active session
-      - pause_replies / resume_replies: acknowledged (future implementation)
     """
     await _require_api_key(x_api_key)
 
@@ -579,8 +630,8 @@ async def execute_tool(
                 status_code=400, content={"error": "No active voice session"}
             )
         backend = _get_backend()
-        await backend.execute(conn.session_id, instruction)
-        return JSONResponse(content={"result": "delegated"})
+        result = await backend.send_message(conn.session_id, instruction)
+        return JSONResponse(content={"result": result})
 
     if name == "cancel_current_task":
         if conn is None:
@@ -589,9 +640,6 @@ async def execute_tool(
             )
         await conn.cancel()
         return JSONResponse(content={"result": "cancelled"})
-
-    if name in ("pause_replies", "resume_replies"):
-        return JSONResponse(content={"result": f"{name} acknowledged"})
 
     return JSONResponse(status_code=400, content={"error": f"Unknown tool: {name}"})
 
@@ -620,10 +668,15 @@ async def cancel_session(
         return JSONResponse(status_code=400, content={"error": "Invalid JSON body"})
 
     session_id: str = body.get("session_id", "")
-    immediate: bool = body.get("immediate", False)
+    level: str = body.get("level", "graceful")
+    if level not in ("graceful", "immediate"):
+        return JSONResponse(
+            status_code=400,
+            content={"error": "level must be 'graceful' or 'immediate'"},
+        )
 
     backend = _get_backend()
-    await backend.cancel_session(session_id, immediate=immediate)
+    await backend.cancel_session(session_id, level=level)
 
     return JSONResponse(content={"cancelled": True, "session_id": session_id})
 

@@ -30,6 +30,9 @@ DISTRO_SETTINGS_FILENAME = "settings.yaml"  # distro-layer config (inside DISTRO
 # The wizard/settings apps modify this overlay; the underlying bundle is untouched.
 DISTRO_OVERLAY_DIR = f"{DISTRO_HOME}/bundle"
 
+# --- Bundle Cache ---
+CACHE_DIR = "cache"  # relative to AMPLIFIER_HOME
+
 # --- Memory Store ---
 MEMORY_DIR = "memory"  # relative to AMPLIFIER_HOME
 MEMORY_STORE_FILENAME = "memory-store.yaml"
