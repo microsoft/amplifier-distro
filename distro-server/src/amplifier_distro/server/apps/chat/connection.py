@@ -238,7 +238,7 @@ class ChatConnection:
                 await self._backend.resume_session(
                     str(resume_session_id),
                     cwd,
-                    event_queue=self.event_queue,
+                    surface=web_chat_surface(self.event_queue),
                 )
                 info = await self._backend.get_session_info(str(resume_session_id))
                 session_id = (

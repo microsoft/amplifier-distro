@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from amplifier_distro.server.protocol_adapters import web_chat_surface
 from amplifier_distro.server.session_backend import FoundationBackend, MockBackend
 
 
@@ -17,7 +18,9 @@ class TestMockBackendQueueIgnored:
     async def test_create_session_accepts_event_queue(self):
         backend = MockBackend()
         q: asyncio.Queue = asyncio.Queue()
-        info = await backend.create_session(working_dir="~", event_queue=q)
+        info = await backend.create_session(
+            working_dir="~", surface=web_chat_surface(q)
+        )
         assert info.session_id is not None
 
 
@@ -60,7 +63,9 @@ class TestFoundationBackendQueueWiring:
         q: asyncio.Queue = asyncio.Queue()
 
         with patch("asyncio.create_task"):
-            await bare_backend.create_session(working_dir="~", event_queue=q)
+            await bare_backend.create_session(
+                working_dir="~", surface=web_chat_surface(q)
+            )
 
         # hooks.register should have been called (for streaming wiring)
         mock_session.coordinator.hooks.register.assert_called()

@@ -23,6 +23,7 @@ from typing import Any
 from amplifier_distro.server.apps.voice.protocols.event_streaming import (
     EventStreamingHook,
 )
+from amplifier_distro.server.protocol_adapters import web_chat_surface
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +58,8 @@ class VoiceConnection:
 
         1. Creates EventStreamingHook wired to the event queue
         2. Calls backend.create_session(description='voice', working_dir=...,
-           event_queue=...) — hook wiring happens automatically inside create_session
-           when event_queue is passed
+           surface=web_chat_surface(self._event_queue)) — hook wiring happens
+           automatically inside create_session when surface is passed
         3. Stores session_id and session_obj
         4. Registers 'spawn' capability on session.coordinator so delegate tool
            sub-sessions use the shared backend (hooks, observability, tracking)
@@ -68,11 +69,11 @@ class VoiceConnection:
         hook = EventStreamingHook(event_queue=self._event_queue)
         self._hook = hook
 
-        # 2. Create session via backend — event_queue wires the hook internally
+        # 2. Create session via backend — surface wires the hook internally
         session = await self._backend.create_session(
             description="voice",
             working_dir=workspace_root,
-            event_queue=self._event_queue,
+            surface=web_chat_surface(self._event_queue),
         )
 
         # 3. Store session references
@@ -98,7 +99,7 @@ class VoiceConnection:
         Without this, delegate tool sub-sessions bypass the backend entirely.
         """
         return await self._backend.create_session(
-            event_queue=self._event_queue,
+            surface=web_chat_surface(self._event_queue),
             **kwargs,
         )
 

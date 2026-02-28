@@ -10,7 +10,7 @@ against a slightly different interface than FoundationBackend provides:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
@@ -91,7 +91,7 @@ class TestCreateSession:
 
     @pytest.mark.asyncio
     async def test_create_passes_event_queue(self):
-        """create() wires the event_queue into create_session for hook setup."""
+        """create() wires the event_queue into create_session via surface=."""
         backend = make_backend()
         repo = make_repository()
 
@@ -99,7 +99,8 @@ class TestCreateSession:
         await conn.create("/tmp")
 
         kwargs = backend.create_session.call_args.kwargs
-        assert kwargs.get("event_queue") is conn.event_queue
+        assert kwargs.get("surface") is not None
+        assert kwargs["surface"].event_queue is conn.event_queue
 
     @pytest.mark.asyncio
     async def test_create_stores_session_id(self):

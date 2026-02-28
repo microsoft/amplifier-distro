@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from amplifier_distro.server.protocol_adapters import web_chat_surface
+
 
 class TestDisplayMessageQueueWiring:
     @pytest.mark.asyncio
@@ -57,7 +59,7 @@ class TestDisplayMessageQueueWiring:
         q: asyncio.Queue = asyncio.Queue()
 
         with patch("asyncio.create_task"):
-            await backend.create_session(working_dir="~", event_queue=q)
+            await backend.create_session(working_dir="~", surface=web_chat_surface(q))
 
         # coordinator.set should have been called with "display"
         set_calls = mock_session.coordinator.set.call_args_list

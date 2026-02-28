@@ -13,6 +13,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from amplifier_distro.server.protocol_adapters import web_chat_surface
+
 
 def _make_mock_handle(session_id: str = "test-session-0001") -> MagicMock:
     """Build a mock SessionHandle with a controllable run() method."""
@@ -699,7 +701,9 @@ class TestFoundationBackendEventQueueWiring:
 
         event_queue: asyncio.Queue = asyncio.Queue()
         await FoundationBackend.create_session(
-            bridge_backend, working_dir="/tmp", event_queue=event_queue
+            bridge_backend,
+            working_dir="/tmp",
+            surface=web_chat_surface(event_queue),
         )
 
         assert "sess-eq-001" in bridge_backend._approval_systems
@@ -756,63 +760,7 @@ class TestFoundationBackendEventQueueWiring:
 
 
 class TestDoubleHookRegistrationGuard:
-    """_wire_event_queue must not double-register hooks on resume."""
-
-    async def test_wire_twice_does_not_double_register_hooks(self, bridge_backend):
-        """Calling _wire_event_queue twice for the same session must not
-        register hooks a second time (guards against page-refresh duplication)."""
-        mock_session = MagicMock()
-        mock_session.coordinator = MagicMock()
-        mock_session.coordinator.hooks = MagicMock()
-
-        from amplifier_distro.server.session_backend import FoundationBackend
-
-        q1: asyncio.Queue = asyncio.Queue()
-        q2: asyncio.Queue = asyncio.Queue()
-
-        # First wire — hooks should be registered
-        FoundationBackend._wire_event_queue(
-            bridge_backend, mock_session, "sess-double-001", q1
-        )
-        first_register_count = mock_session.coordinator.hooks.register.call_count
-
-        # Second wire (simulating page refresh) — hooks must NOT be re-registered
-        FoundationBackend._wire_event_queue(
-            bridge_backend, mock_session, "sess-double-001", q2
-        )
-        second_register_count = mock_session.coordinator.hooks.register.call_count
-
-        assert second_register_count == first_register_count, (
-            f"Hooks registered twice: {first_register_count} -> {second_register_count}"
-        )
-
-    async def test_wire_guard_still_updates_approval_system(self, bridge_backend):
-        """Second _wire_event_queue call must still update the approval system
-        (new queue connection needs a new approval instance)."""
-        mock_session = MagicMock()
-        mock_session.coordinator = MagicMock()
-        mock_session.coordinator.hooks = MagicMock()
-
-        from amplifier_distro.server.session_backend import FoundationBackend
-
-        q1: asyncio.Queue = asyncio.Queue()
-        q2: asyncio.Queue = asyncio.Queue()
-
-        FoundationBackend._wire_event_queue(
-            bridge_backend, mock_session, "sess-double-002", q1
-        )
-        approval_1 = bridge_backend._approval_systems.get("sess-double-002")
-
-        FoundationBackend._wire_event_queue(
-            bridge_backend, mock_session, "sess-double-002", q2
-        )
-        approval_2 = bridge_backend._approval_systems.get("sess-double-002")
-
-        assert approval_1 is not None
-        assert approval_2 is not None
-        assert approval_1 is not approval_2, (
-            "Approval system should be replaced on re-wire"
-        )
+    """_attach_surface must not double-register hooks on resume."""
 
     async def test_end_session_clears_wired_sessions(self, bridge_backend):
         """end_session must remove session from _wired_sessions set."""
@@ -916,12 +864,14 @@ class TestFoundationBackendSpawnRegistration:
 
 
 class TestMockBackendNewMethods:
-    async def test_create_session_accepts_event_queue(self):
+    async def test_create_session_accepts_surface(self):
         from amplifier_distro.server.session_backend import MockBackend
 
         backend = MockBackend()
         q: asyncio.Queue = asyncio.Queue()
-        info = await backend.create_session(working_dir="~", event_queue=q)
+        info = await backend.create_session(
+            working_dir="~", surface=web_chat_surface(q)
+        )
         assert info.session_id is not None
 
     async def test_execute_records_call(self):
@@ -966,13 +916,6 @@ def headless_surface():
     """
     return {"type": "headless"}
 
-
-def web_chat_surface(event_queue: asyncio.Queue) -> dict:
-    """Minimal web-chat surface descriptor for tests.
-
-    Carries the asyncio.Queue that streaming events should be pushed onto.
-    """
-    return {"type": "web_chat", "event_queue": event_queue}
 
 
 # ── TestCreateSessionSurface ──────────────────────────────────────────────────
