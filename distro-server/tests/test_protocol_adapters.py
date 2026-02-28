@@ -277,3 +277,47 @@ class TestSessionSurface:
         assert surface.approval_system is approval_sentinel
         assert surface.display_system is display_sentinel
         assert surface.on_bundle_reload is reload_sentinel
+
+
+# ── headless_surface() ──────────────────────────────────────────────────────
+
+
+class TestHeadlessSurface:
+    def test_headless_surface_returns_session_surface(self):
+        from amplifier_distro.server.protocol_adapters import (
+            SessionSurface,
+            headless_surface,
+        )
+
+        assert isinstance(headless_surface(), SessionSurface)
+
+    def test_headless_surface_event_queue_is_none(self):
+        from amplifier_distro.server.protocol_adapters import headless_surface
+
+        surface = headless_surface()
+        assert surface.event_queue is None
+
+    def test_headless_surface_has_auto_approve_approval_system(self):
+        from amplifier_distro.server.protocol_adapters import (
+            ApprovalSystem,
+            headless_surface,
+        )
+
+        surface = headless_surface()
+        assert isinstance(surface.approval_system, ApprovalSystem)
+        assert surface.approval_system._auto_approve is True
+
+    def test_headless_surface_has_log_display_system(self):
+        from amplifier_distro.server.protocol_adapters import (
+            LogDisplaySystem,
+            headless_surface,
+        )
+
+        surface = headless_surface()
+        assert isinstance(surface.display_system, LogDisplaySystem)
+
+    def test_headless_surface_on_bundle_reload_is_none(self):
+        from amplifier_distro.server.protocol_adapters import headless_surface
+
+        surface = headless_surface()
+        assert surface.on_bundle_reload is None
