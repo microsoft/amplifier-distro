@@ -12,7 +12,7 @@ from amplifier_distro.server.session_backend import FoundationBackend, MockBacke
 
 
 class TestMockBackendQueueIgnored:
-    """MockBackend gracefully ignores event_queue (it doesn't stream)."""
+    """MockBackend gracefully ignores surface= (it doesn't stream)."""
 
     @pytest.mark.asyncio
     async def test_create_session_accepts_event_queue(self):
@@ -54,7 +54,7 @@ class TestFoundationBackendQueueWiring:
     async def test_create_session_wires_on_stream_when_queue_provided(
         self, bare_backend
     ):
-        """When event_queue is provided, hooks.register is called for streaming."""
+        """When surface= is provided, hooks.register is called for streaming."""
         mock_session = self._mock_session("test-session-001")
         mock_prepared = MagicMock()
         mock_prepared.create_session = AsyncMock(return_value=mock_session)
