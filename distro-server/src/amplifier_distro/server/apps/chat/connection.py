@@ -102,19 +102,26 @@ class ChatConnection:
         Only allows connections from localhost origins.
         """
         # Origin check — prevents CSRF from evil.com → localhost:PORT
+        # When the user binds to a non-localhost host (e.g. 0.0.0.0, a LAN IP,
+        # a Tailscale IP), they've explicitly opted into network access.
+        # The API key is the real security boundary — CSRF origin checks only
+        # protect against ambient credentials (cookies), which we don't use.
+        server_host = getattr(self._config.server, "host", "127.0.0.1")
         origin = self._ws.headers.get("origin", "")
         if origin:  # skip for non-browser clients (no Origin header)
-            allowed = {"http://localhost", "http://127.0.0.1", "https://localhost"}
-            # Allow any localhost:PORT variant
-            is_localhost = any(
-                origin.startswith(allowed_prefix) for allowed_prefix in allowed
-            )
-            if not is_localhost:
-                logger.warning(
-                    "Rejected WebSocket from non-localhost origin: %s", origin
+            if server_host not in ("127.0.0.1", "localhost"):
+                pass  # non-localhost host: skip origin restriction
+            else:
+                allowed = {"http://localhost", "http://127.0.0.1", "https://localhost"}
+                is_localhost = any(
+                    origin.startswith(allowed_prefix) for allowed_prefix in allowed
                 )
-                await self._ws.close(4003, "Forbidden origin")
-                raise WebSocketDisconnect(code=4003)
+                if not is_localhost:
+                    logger.warning(
+                        "Rejected WebSocket from non-localhost origin: %s", origin
+                    )
+                    await self._ws.close(4003, "Forbidden origin")
+                    raise WebSocketDisconnect(code=4003)
 
         api_key = getattr(self._config.server, "api_key", None)
         if api_key is None:

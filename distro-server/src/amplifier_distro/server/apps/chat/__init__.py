@@ -175,7 +175,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     from amplifier_distro.server.services import get_services
 
     api_key = os.environ.get("AMPLIFIER_SERVER_API_KEY")
-    config = types.SimpleNamespace(server=types.SimpleNamespace(api_key=api_key))
+    host = getattr(ws.app.state, "host", "127.0.0.1")
+    config = types.SimpleNamespace(
+        server=types.SimpleNamespace(api_key=api_key, host=host)
+    )
 
     try:
         services = get_services()

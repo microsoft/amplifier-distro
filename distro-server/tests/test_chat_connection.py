@@ -9,7 +9,7 @@ import pytest
 from amplifier_distro.server.apps.chat.connection import _STOP
 
 
-def make_ws(messages: list[dict]):
+def make_ws(messages: list[dict], headers: dict[str, str] | None = None):
     """Create a mock WebSocket that replays messages then raises disconnect."""
     from starlette.websockets import WebSocketDisconnect
 
@@ -17,6 +17,7 @@ def make_ws(messages: list[dict]):
     ws.accept = AsyncMock()
     ws.close = AsyncMock()
     ws.send_json = AsyncMock()
+    ws.headers = headers or {}
 
     msg_iter = iter(messages)
 
@@ -44,10 +45,11 @@ def make_backend(session_id: str = "test-sess-001"):
     return backend
 
 
-def make_config(api_key: str | None = None):
+def make_config(api_key: str | None = None, host: str = "127.0.0.1"):
     config = MagicMock()
     config.server = MagicMock()
     config.server.api_key = api_key
+    config.server.host = host
     return config
 
 
@@ -420,3 +422,87 @@ class TestSyntheticStreaming:
         assert len(delta_messages) > 0
         full = "".join(m["delta"] for m in delta_messages)
         assert full == "Object payload thinking"
+
+
+class TestOriginCheck:
+    """Verify _auth_handshake origin restriction logic."""
+
+    @pytest.mark.asyncio
+    async def test_localhost_host_rejects_lan_origin(self):
+        """Default host (127.0.0.1) rejects non-localhost origins with 4003."""
+        from starlette.websockets import WebSocketDisconnect
+
+        from amplifier_distro.server.apps.chat.connection import ChatConnection
+
+        ws = make_ws([], headers={"origin": "http://192.168.1.50:8000"})
+        config = make_config(host="127.0.0.1")
+        conn = ChatConnection(ws, make_backend(), config)
+
+        with pytest.raises(WebSocketDisconnect):
+            await conn._auth_handshake()
+
+        ws.close.assert_awaited_once_with(4003, "Forbidden origin")
+
+    @pytest.mark.asyncio
+    async def test_localhost_host_allows_localhost_origin(self):
+        """Default host (127.0.0.1) allows localhost origins."""
+        from amplifier_distro.server.apps.chat.connection import ChatConnection
+
+        ws = make_ws([], headers={"origin": "http://localhost:8000"})
+        config = make_config(host="127.0.0.1")
+        conn = ChatConnection(ws, make_backend(), config)
+
+        await conn._auth_handshake()
+        ws.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_wildcard_host_allows_lan_origin(self):
+        """host=0.0.0.0 skips origin check — allows LAN origins."""
+        from amplifier_distro.server.apps.chat.connection import ChatConnection
+
+        ws = make_ws([], headers={"origin": "http://192.168.1.50:8000"})
+        config = make_config(host="0.0.0.0")
+        conn = ChatConnection(ws, make_backend(), config)
+
+        await conn._auth_handshake()
+        ws.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_specific_lan_host_allows_lan_origin(self):
+        """host=192.168.1.50 skips origin check — allows any origin."""
+        from amplifier_distro.server.apps.chat.connection import ChatConnection
+
+        ws = make_ws([], headers={"origin": "http://10.0.0.5:8000"})
+        config = make_config(host="192.168.1.50")
+        conn = ChatConnection(ws, make_backend(), config)
+
+        await conn._auth_handshake()
+        ws.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_origin_header_always_allowed(self):
+        """Non-browser clients (no Origin header) are always allowed."""
+        from amplifier_distro.server.apps.chat.connection import ChatConnection
+
+        ws = make_ws([], headers={})
+        config = make_config(host="127.0.0.1")
+        conn = ChatConnection(ws, make_backend(), config)
+
+        await conn._auth_handshake()
+        ws.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_localhost_name_host_rejects_lan_origin(self):
+        """host='localhost' (the string) also enforces strict origin check."""
+        from starlette.websockets import WebSocketDisconnect
+
+        from amplifier_distro.server.apps.chat.connection import ChatConnection
+
+        ws = make_ws([], headers={"origin": "http://192.168.1.50:8000"})
+        config = make_config(host="localhost")
+        conn = ChatConnection(ws, make_backend(), config)
+
+        with pytest.raises(WebSocketDisconnect):
+            await conn._auth_handshake()
+
+        ws.close.assert_awaited_once_with(4003, "Forbidden origin")
