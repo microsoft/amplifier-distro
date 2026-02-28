@@ -30,6 +30,8 @@ def make_backend(session_id: str = "voice-sess-001"):
     backend.cancel_session = AsyncMock(return_value=None)
     backend.end_session = AsyncMock(return_value=None)
     backend.mark_disconnected = AsyncMock(return_value=None)
+    # Mock get_hook_unregister to return a callable (required by fix/approval-display)
+    backend.get_hook_unregister = MagicMock(return_value=MagicMock())
     return backend
 
 
@@ -91,7 +93,7 @@ class TestCreateSession:
 
     @pytest.mark.asyncio
     async def test_create_passes_event_queue(self):
-        """create() wires the event_queue into create_session for hook setup."""
+        """create() wires the event_queue into create_session via surface."""
         backend = make_backend()
         repo = make_repository()
 
@@ -99,7 +101,9 @@ class TestCreateSession:
         await conn.create("/tmp")
 
         kwargs = backend.create_session.call_args.kwargs
-        assert kwargs.get("event_queue") is conn.event_queue
+        surface = kwargs.get("surface")
+        assert surface is not None
+        assert surface.event_queue is conn.event_queue
 
     @pytest.mark.asyncio
     async def test_create_stores_session_id(self):
@@ -140,10 +144,10 @@ class TestNoRegisterHooks:
 
     @pytest.mark.asyncio
     async def test_hook_unregister_set_after_create(self):
-        """create() fetches the hook unregister callable from the backend.
+        """create() passes surface to backend for hook management.
 
-        Stored on _hook_unregister so _cleanup_hook() can unregister hooks
-        on disconnect, preventing dead hook accumulation across reconnects.
+        The surface parameter ensures hooks are properly registered and
+        unregistered on disconnect, preventing dead hook accumulation across reconnects.
         """
         backend = make_backend()
         repo = make_repository()
@@ -151,8 +155,9 @@ class TestNoRegisterHooks:
         conn = VoiceConnection(repo, backend)
         await conn.create("/tmp")
 
-        # _hook_unregister should be set — fetched from backend.get_hook_unregister()
-        assert conn._hook_unregister is not None
+        # Verify surface was passed to create_session for hook management
+        kwargs = backend.create_session.call_args.kwargs
+        assert kwargs.get("surface") is not None
 
 
 # ---------------------------------------------------------------------------

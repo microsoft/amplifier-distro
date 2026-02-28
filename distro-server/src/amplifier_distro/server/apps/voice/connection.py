@@ -130,12 +130,14 @@ class VoiceConnection:
         finally:
             self._cleanup_hook()
 
-    async def cancel(self, immediate: bool = False) -> None:
-        """Cancel the running session."""
+    async def cancel(self, level: str = "graceful") -> None:
+        """Cancel the running session.
+
+        Args:
+            level: Either "graceful" (default, allows cleanup) or "immediate" (stop now)
+        """
         if self._session_id is not None:
-            await self._backend.cancel_session(
-                self._session_id, level="immediate" if immediate else "graceful"
-            )
+            await self._backend.cancel_session(self._session_id, level=level)
 
     def _cleanup_hook(self) -> None:
         """Unregister the hook if one is registered. Always safe to call."""
