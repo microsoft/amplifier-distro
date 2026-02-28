@@ -4,8 +4,9 @@ Provides two functions used by the voice app:
   - create_client_secret: Creates an ephemeral token via /client_secrets
   - exchange_sdp: Exchanges WebRTC SDP offer/answer via /calls
 
-GA API note: voice, turn_detection, and modalities are NOT supported
-at session creation time (client_secrets endpoint).
+Note: voice, turn_detection, modalities, and input_audio_transcription are
+NOT supported at session creation time. Transcription config is sent via
+session.update on dc.onopen (see static/index.html).
 """
 
 from __future__ import annotations
@@ -40,9 +41,6 @@ async def create_client_secret(config: VoiceConfig) -> str:
 
     POSTs to CLIENT_SECRETS_ENDPOINT with the session configuration.
     Returns the ephemeral token string (e.g. 'ek_...').
-
-    GA API note: voice, turn_detection, and modalities are NOT supported
-    at session creation time — only model, instructions, and tools.
 
     Args:
         config: VoiceConfig with model, instructions, tools, and openai_api_key.

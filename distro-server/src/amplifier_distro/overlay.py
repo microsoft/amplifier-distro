@@ -15,6 +15,7 @@ include resolution and composition automatically.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,10 @@ import yaml
 from .conventions import DISTRO_OVERLAY_DIR
 from .features import AMPLIFIER_START_URI, Provider, provider_bundle_uri
 
-SESSION_NAMING_URI = (
+logger = logging.getLogger(__name__)
+
+# Kept here ONLY for migration — it is never added to new overlays.
+_STALE_SESSION_NAMING_URI = (
     "git+https://github.com/microsoft/amplifier-foundation@main"
     "#subdirectory=modules/hooks-session-naming"
 )
@@ -52,6 +56,9 @@ def read_overlay() -> dict[str, Any]:
     try:
         return yaml.safe_load(path.read_text()) or {}
     except (yaml.YAMLError, OSError):
+        logger.warning(
+            "Overlay bundle at %s is corrupt or unreadable; treating as absent", path
+        )
         return {}
 
 
@@ -61,6 +68,15 @@ def _write_overlay(data: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
     return path
+
+
+def _filter_includes(includes: list[Any], uri: str) -> list[Any]:
+    """Return *includes* with every entry matching *uri* removed."""
+    return [
+        entry
+        for entry in includes
+        if (entry.get("bundle") if isinstance(entry, dict) else entry) != uri
+    ]
 
 
 def get_includes(data: dict[str, Any] | None = None) -> list[str]:
@@ -74,7 +90,7 @@ def get_includes(data: dict[str, Any] | None = None) -> list[str]:
 
 
 def ensure_overlay(provider: Provider) -> Path:
-    """Create (or update) the overlay bundle with include to maintained bundle + a provider.
+    """Create (or update) the overlay bundle with the distro bundle + a provider.
 
     If the overlay already exists, the provider include is added only if
     not already present.  The distro bundle include is always ensured.
@@ -93,13 +109,17 @@ def ensure_overlay(provider: Provider) -> Path:
             "includes": [
                 {"bundle": AMPLIFIER_START_URI},
                 {"bundle": provider_bundle_uri(provider)},
-                {"bundle": SESSION_NAMING_URI},
             ],
         }
     else:
-        # Existing overlay — ensure includes are present
+        # Strip stale entries first so current_uris is clean before checking
+        # what's already present (otherwise the stale URI would appear in
+        # current_uris and block re-insertion of legitimate URIs).
+        data["includes"] = _filter_includes(
+            data.get("includes", []), _STALE_SESSION_NAMING_URI
+        )
         current_uris = set(get_includes(data))
-        includes = data.setdefault("includes", [])
+        includes = data["includes"]
 
         if AMPLIFIER_START_URI not in current_uris:
             includes.insert(0, {"bundle": AMPLIFIER_START_URI})
@@ -107,9 +127,6 @@ def ensure_overlay(provider: Provider) -> Path:
         prov_uri = provider_bundle_uri(provider)
         if prov_uri not in current_uris:
             includes.append({"bundle": prov_uri})
-
-        if SESSION_NAMING_URI not in current_uris:
-            includes.append({"bundle": SESSION_NAMING_URI})
 
     _write_overlay(data)
     return overlay_dir()
@@ -133,9 +150,5 @@ def remove_include(uri: str) -> None:
     if not data:
         return
 
-    data["includes"] = [
-        entry
-        for entry in data.get("includes", [])
-        if (entry.get("bundle") if isinstance(entry, dict) else entry) != uri
-    ]
+    data["includes"] = _filter_includes(data.get("includes", []), uri)
     _write_overlay(data)

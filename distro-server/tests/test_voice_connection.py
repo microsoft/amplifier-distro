@@ -140,10 +140,11 @@ class TestNoRegisterHooks:
             backend.register_hooks.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_hook_unregister_defaults_none_after_create(self):
-        """With register_hooks removed, _hook_unregister stays None after create().
+    async def test_hook_unregister_set_after_create(self):
+        """create() fetches the hook unregister callable from the backend.
 
-        _cleanup_hook() already guards for None, so teardown and end remain safe.
+        Stored on _hook_unregister so _cleanup_hook() can unregister hooks
+        on disconnect, preventing dead hook accumulation across reconnects.
         """
         backend = make_backend()
         repo = make_repository()
@@ -151,8 +152,8 @@ class TestNoRegisterHooks:
         conn = VoiceConnection(repo, backend)
         await conn.create("/tmp")
 
-        # _hook_unregister should be None — no callable was stored
-        assert conn._hook_unregister is None
+        # _hook_unregister should be set — fetched from backend.get_hook_unregister()
+        assert conn._hook_unregister is not None
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +170,7 @@ class TestCancelSession:
 
         conn = VoiceConnection(repo, backend)
         await conn.create("/tmp")
-        await conn.cancel(immediate=True)
+        await conn.cancel(level="immediate")
 
         backend.cancel_session.assert_awaited_once_with(
             "sess-cancel-001", level="immediate"
@@ -177,13 +178,13 @@ class TestCancelSession:
 
     @pytest.mark.asyncio
     async def test_cancel_graceful_passes_level_graceful(self):
-        """cancel(immediate=False) must pass level='graceful' (the default)."""
+        """cancel(level='graceful') passes level='graceful' to cancel_session."""
         backend = make_backend("sess-cancel-002")
         repo = make_repository()
 
         conn = VoiceConnection(repo, backend)
         await conn.create("/tmp")
-        await conn.cancel(immediate=False)
+        await conn.cancel(level="graceful")
 
         backend.cancel_session.assert_awaited_once_with(
             "sess-cancel-002", level="graceful"
@@ -211,7 +212,7 @@ class TestCancelSession:
 
         conn = VoiceConnection(repo, backend)
         await conn.create("/tmp")
-        await conn.cancel(immediate=True)
+        await conn.cancel(level="immediate")
 
         _, kwargs = backend.cancel_session.call_args
         assert "immediate" not in kwargs, (
@@ -225,7 +226,7 @@ class TestCancelSession:
         repo = make_repository()
 
         conn = VoiceConnection(repo, backend)
-        await conn.cancel(immediate=True)
+        await conn.cancel(level="immediate")
 
         backend.cancel_session.assert_not_awaited()
 

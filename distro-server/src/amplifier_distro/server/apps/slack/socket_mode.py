@@ -58,11 +58,13 @@ class SocketModeAdapter:
         self,
         config: SlackConfig,
         event_handler: SlackEventHandler,
+        session: aiohttp.ClientSession | None = None,
     ) -> None:
         self._config = config
         self._event_handler = event_handler
         self._task: asyncio.Task[None] | None = None
         self._session: aiohttp.ClientSession | None = None
+        self._external_session: aiohttp.ClientSession | None = session
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._running = False
         self._bot_user_id: str | None = None
@@ -130,9 +132,12 @@ class SocketModeAdapter:
                 url = await self._get_ws_url()
                 logger.info("Connecting to Slack Socket Mode WebSocket...")
 
-                session = aiohttp.ClientSession()
-                self._session = session
-                self._ws = await session.ws_connect(url)
+                if self._external_session is not None:
+                    _ws_session = self._external_session
+                else:
+                    _ws_session = aiohttp.ClientSession()
+                self._session = _ws_session
+                self._ws = await _ws_session.ws_connect(url)
                 logger.info("WebSocket connected")
 
                 # Reset backoff on successful connection
@@ -384,7 +389,11 @@ class SocketModeAdapter:
             await self._ws.send_json(ack_payload)
 
     async def _close_ws(self) -> None:
-        """Close WebSocket and HTTP session."""
+        """Close WebSocket and owned HTTP session.
+
+        If the session was injected externally (via constructor ``session=``
+        parameter), we do **not** close it here — the caller owns its lifetime.
+        """
         if self._ws and not self._ws.closed:
             try:
                 await self._ws.close()
@@ -392,7 +401,12 @@ class SocketModeAdapter:
                 logger.debug("Error closing WebSocket", exc_info=True)
         self._ws = None
 
-        if self._session and not self._session.closed:
+        # Only close the session when we created it ourselves
+        if (
+            self._session is not None
+            and self._session is not self._external_session
+            and not self._session.closed
+        ):
             try:
                 await self._session.close()
             except OSError:

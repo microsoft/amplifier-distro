@@ -49,6 +49,11 @@ router = APIRouter()
 _state: dict[str, Any] = {}
 _state_lock = threading.Lock()
 
+# Shared aiohttp session for Socket Mode connections.
+# Created in on_startup() when socket mode is active; closed in on_shutdown().
+# None in simulator mode (MemorySlackClient needs no HTTP session).
+_slack_aiohttp_session: "aiohttp.ClientSession | None" = None  # noqa: UP037, F821  # pyright: ignore[reportUndefinedVariable]
+
 
 def _get_state() -> dict[str, Any]:
     """Get the initialized bridge state."""
@@ -141,6 +146,7 @@ def initialize(
 
 async def on_startup() -> None:
     """Initialize the Slack bridge on server startup."""
+    global _slack_aiohttp_session
     initialize()
     with _state_lock:
         config: SlackConfig = _state["config"]
@@ -149,15 +155,27 @@ async def on_startup() -> None:
     # Start Socket Mode connection if configured
     if config.socket_mode and config.is_configured:
         try:
+            import aiohttp  # pyright: ignore[reportMissingImports]
+
             from .socket_mode import SocketModeAdapter
 
+            # Create one long-lived session shared across all Socket Mode
+            # connections. Injecting it prevents the adapter from creating
+            # (and potentially leaking) a new session on every reconnect.
+            _slack_aiohttp_session = aiohttp.ClientSession()
+
             with _state_lock:
-                adapter = SocketModeAdapter(config, _state["event_handler"])
+                adapter = SocketModeAdapter(
+                    config,
+                    _state["event_handler"],
+                    session=_slack_aiohttp_session,
+                )
                 _state["socket_adapter"] = adapter
             await adapter.start()
             logger.info("Socket Mode connection started")
         except ImportError:
-            logger.error(
+            # ImportError traceback not useful; warning level sufficient
+            logger.warning(
                 "Socket Mode requires optional dependencies: "
                 "uv pip install amplifier-distro[slack]  (aiohttp missing)"
             )
@@ -167,6 +185,7 @@ async def on_startup() -> None:
 
 async def on_shutdown() -> None:
     """Clean up the Slack bridge on server shutdown."""
+    global _slack_aiohttp_session
     with _state_lock:
         socket_adapter = _state.get("socket_adapter")
         session_manager = _state.get("session_manager")
@@ -183,6 +202,13 @@ async def on_shutdown() -> None:
                 await backend.end_session(mapping.session_id)
             except (RuntimeError, ValueError, ConnectionError, OSError):
                 logger.exception(f"Error ending session {mapping.session_id}")
+
+    # Close the shared aiohttp session that was injected into SocketModeAdapter.
+    # Guard against double-close (aiohttp raises RuntimeError on an already-closed
+    # session). In simulator mode this variable is None — no-op.
+    if _slack_aiohttp_session is not None and not _slack_aiohttp_session.closed:
+        await _slack_aiohttp_session.close()
+    _slack_aiohttp_session = None
 
     with _state_lock:
         _state.clear()

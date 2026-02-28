@@ -232,8 +232,16 @@ def _restart_server(
 ) -> None:
     """Stop the server (if running) and start a fresh instance.
 
-    Uses daemon.stop_process for graceful shutdown (SIGTERM then SIGKILL),
-    then daemon.daemonize to spawn a new process.
+    **Supervisor-managed path (systemd/launchd):** If INVOCATION_ID
+    (systemd) or LAUNCHD_JOB_NAME (launchd) is set in the environment,
+    we stop the server and exit with code 1. The supervisor sees the
+    non-zero exit and restarts both amp-distro serve and this watchdog
+    cleanly, avoiding double-restart races and orphan processes.
+
+    **Standalone path:** Stop the server, pause for port release, then
+    spawn a fresh instance via daemonize(). If the port is still busy,
+    log a warning and return -- the watchdog loop will retry on the next
+    health check interval.
 
     Args:
         host: Server bind host.
@@ -243,16 +251,32 @@ def _restart_server(
     """
     server_pid = pid_file_path()
 
-    # Stop existing server if running
+    # If running under a service manager, stop the server and exit with error.
+    # The supervisor (systemd Restart=on-failure / launchd KeepAlive) will
+    # restart amp-distro serve cleanly -- no risk of double-restart.
+    if os.environ.get("INVOCATION_ID") or os.environ.get("LAUNCHD_JOB_NAME"):
+        logger.info(
+            "Running under service manager — stopping server and exiting "
+            "to trigger supervised restart"
+        )
+        stop_process(server_pid)
+        sys.exit(1)
+
+    # Standalone path: stop the server and restart directly.
     if is_running(server_pid):
         logger.info("Stopping existing server...")
         stop_process(server_pid)
         # Brief pause for port release
         time.sleep(2)
 
-    # Start fresh server
-    pid = daemonize(host=host, port=port, apps_dir=apps_dir, dev=dev)
-    logger.info("Server restarted (PID %d)", pid)
+    try:
+        pid = daemonize(host=host, port=port, apps_dir=apps_dir, dev=dev)
+        logger.info("Server restarted (PID %d)", pid)
+    except RuntimeError as e:
+        logger.warning(
+            "Port still busy after server stop — will retry next cycle: %s", e
+        )
+        return
 
 
 # ---------------------------------------------------------------------------

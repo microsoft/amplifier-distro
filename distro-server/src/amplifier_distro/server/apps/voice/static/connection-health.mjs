@@ -4,7 +4,7 @@
  * Tracks WebRTC session health: session age, event recency, speech
  * recency, disconnect history, reconnect count, and reconnect strategy.
  */
-export class ConnectionHealthManager {
+class ConnectionHealthManager {
   /**
    * @param {{ strategy?: 'manual'|'auto_immediate'|'auto_delayed'|'proactive' }} options
    */

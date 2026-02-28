@@ -5,8 +5,8 @@ external services (gh CLI, OpenAI, Anthropic, etc.), and optionally
 uses a temp AMPLIFIER_HOME so writes don't touch ~/.amplifier/.
 
 Usage:
-    amp-distro-server --stub             # stub mode with temp home
-    amp-distro-server --stub --reload    # + hot-reload for HTML editing
+    amp-distro serve --stub             # stub mode with temp home
+    amp-distro serve --stub --reload    # + hot-reload for HTML editing
 
 Stub mode implies --dev (MockBackend for sessions).
 """

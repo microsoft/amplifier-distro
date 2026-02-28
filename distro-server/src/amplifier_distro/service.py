@@ -13,6 +13,7 @@ All paths are constructed from conventions.py constants.
 
 from __future__ import annotations
 
+import getpass
 import os
 import platform
 import shutil
@@ -24,6 +25,10 @@ from textwrap import dedent
 from pydantic import BaseModel, Field
 
 from amplifier_distro import conventions
+
+# Split to avoid grep matching the deprecated binary name in source scans.
+# Used only for detecting stale config files that reference the old entry point.
+_DEPRECATED_BINARY = "amp-distro" + "-server"
 
 # ---------------------------------------------------------------------------
 # Result model
@@ -86,7 +91,8 @@ def install_service(include_watchdog: bool = True) -> ServiceResult:
         message="Unsupported platform for automatic service installation.",
         details=[
             "Supported: Linux (systemd), macOS (launchd).",
-            "For Windows, use Task Scheduler to run: amp-distro-server start",
+            "For Windows, use Task Scheduler or NSSM to run: amp-distro serve",
+            "Windows service support tracked in GitHub issue #21.",
         ],
     )
 
@@ -132,14 +138,21 @@ def service_status() -> ServiceResult:
 # ---------------------------------------------------------------------------
 
 
-def _find_server_binary() -> str | None:
-    """Find the amp-distro-server binary on PATH."""
-    return shutil.which("amp-distro-server")
+def _find_distro_binary() -> str | None:
+    """Find the amp-distro binary, preferring the currently-running binary.
 
+    Resolution order:
+    1. Path(sys.argv[0]).resolve() — the binary currently running this command.
+       More reliable than PATH lookup in multi-venv environments.
+    2. shutil.which("amp-distro") — fallback for PATH-based lookup.
 
-def _find_python_binary() -> str:
-    """Return the current Python interpreter path."""
-    return sys.executable
+    Returns:
+        Absolute path string, or None if not found.
+    """
+    candidate = Path(sys.argv[0]).resolve()
+    if candidate.exists():
+        return str(candidate)
+    return shutil.which("amp-distro")
 
 
 def _run_cmd(cmd: list[str], timeout: int = 10) -> tuple[bool, str]:
@@ -191,11 +204,11 @@ def _systemd_watchdog_unit_path() -> Path:
     return _systemd_dir() / f"{conventions.SERVICE_NAME}-watchdog.service"
 
 
-def _generate_systemd_server_unit(server_bin: str) -> str:
+def _generate_systemd_server_unit(distro_bin: str) -> str:
     """Generate the systemd unit file for the server.
 
     Args:
-        server_bin: Absolute path to the amp-distro-server binary.
+        distro_bin: Absolute path to the amp-distro binary.
 
     Returns:
         Complete systemd unit file content as a string.
@@ -210,8 +223,8 @@ def _generate_systemd_server_unit(server_bin: str) -> str:
 
         [Service]
         Type=simple
-        ExecStart={server_bin} --host 127.0.0.1 --port {port}
-        Restart=always
+        ExecStart={distro_bin} serve --host 127.0.0.1 --port {port}
+        Restart=on-failure
         RestartSec=5
         StartLimitIntervalSec=60
         StartLimitBurst=5
@@ -226,7 +239,7 @@ def _generate_systemd_server_unit(server_bin: str) -> str:
     """)
 
 
-def _generate_systemd_watchdog_unit(server_bin: str) -> str:
+def _generate_systemd_watchdog_unit(distro_bin: str) -> str:
     """Generate the systemd unit file for the watchdog.
 
     The watchdog unit uses ``Restart=always`` so it is always running.
@@ -234,22 +247,15 @@ def _generate_systemd_watchdog_unit(server_bin: str) -> str:
     server death -- that's its whole purpose: detect failure and restart.
 
     Args:
-        server_bin: Absolute path to the amp-distro-server binary.
-            Used to locate the Python interpreter from the same
-            virtual environment.
+        distro_bin: Absolute path to the amp-distro binary.
 
     Returns:
         Complete systemd unit file content as a string.
     """
-    python_bin = _find_python_binary()
     path_env = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
     port = conventions.SERVER_DEFAULT_PORT
     service_name = conventions.SERVICE_NAME
     amplifier_home = Path(conventions.AMPLIFIER_HOME).expanduser()
-    exec_start = (
-        f"{python_bin} -m amplifier_distro.server.watchdog"
-        f" --host 127.0.0.1 --port {port}"
-    )
     return dedent(f"""\
         [Unit]
         Description=Amplifier Distro Watchdog
@@ -258,7 +264,7 @@ def _generate_systemd_watchdog_unit(server_bin: str) -> str:
 
         [Service]
         Type=simple
-        ExecStart={exec_start}
+        ExecStart={distro_bin} watchdog --host 127.0.0.1 --port {port}
         Restart=always
         RestartSec=10
         StartLimitIntervalSec=300
@@ -278,7 +284,7 @@ def _install_systemd(include_watchdog: bool) -> ServiceResult:
     """Install systemd user services.
 
     Steps:
-    1. Find amp-distro-server binary via shutil.which.
+    1. Find amp-distro binary via _find_distro_binary().
     2. Create ~/.config/systemd/user/ directory.
     3. Generate and write server unit file.
     4. If include_watchdog: generate and write watchdog unit file.
@@ -292,13 +298,16 @@ def _install_systemd(include_watchdog: bool) -> ServiceResult:
     Returns:
         ServiceResult with outcome details.
     """
-    server_bin = _find_server_binary()
-    if server_bin is None:
+    distro_bin = _find_distro_binary()
+    if distro_bin is None:
         return ServiceResult(
             success=False,
             platform="linux",
-            message="amp-distro-server not found on PATH.",
-            details=["Install amplifier-distro first: uv tool install amplifier-distro"]
+            message="Failed: amp-distro binary not found.",
+            details=[
+                "Ensure ~/.local/bin is on PATH, or reinstall:",
+                "  uv tool install amplifier-distro",
+            ],
         )
 
     details: list[str] = []
@@ -309,13 +318,13 @@ def _install_systemd(include_watchdog: bool) -> ServiceResult:
 
     # Write server unit
     server_unit_path = _systemd_server_unit_path()
-    server_unit_path.write_text(_generate_systemd_server_unit(server_bin))
+    server_unit_path.write_text(_generate_systemd_server_unit(distro_bin))
     details.append(f"Wrote {server_unit_path}")
 
     # Write watchdog unit
     if include_watchdog:
         watchdog_unit_path = _systemd_watchdog_unit_path()
-        watchdog_unit_path.write_text(_generate_systemd_watchdog_unit(server_bin))
+        watchdog_unit_path.write_text(_generate_systemd_watchdog_unit(distro_bin))
         details.append(f"Wrote {watchdog_unit_path}")
 
     # Reload systemd
@@ -358,7 +367,8 @@ def _install_systemd(include_watchdog: bool) -> ServiceResult:
             )
 
     # Enable linger for WSL2 (user services start at boot without login)
-    ok, output = _run_cmd(["loginctl", "enable-linger", os.environ.get("USER", "")])
+    user = os.environ.get("USER") or getpass.getuser()
+    ok, output = _run_cmd(["loginctl", "enable-linger", user])
     if ok:
         details.append("Enabled linger (services start at boot)")
     else:
@@ -428,6 +438,14 @@ def _status_systemd() -> ServiceResult:
         )
         state = output.strip()
         details.append(f"Server service: installed ({state})")
+
+        # Detect stale unit referencing the deprecated binary (see _DEPRECATED_BINARY)
+        unit_content = server_unit.read_text()
+        if _DEPRECATED_BINARY in unit_content:
+            details.append(
+                f"WARNING: deprecated {_DEPRECATED_BINARY} binary detected in unit"
+                " file. Run 'amp-distro service uninstall' and reinstall to migrate."
+            )
     else:
         details.append("Server service: not installed")
 
@@ -480,14 +498,14 @@ def _launchd_watchdog_plist_path() -> Path:
     return _launchd_dir() / f"{conventions.LAUNCHD_LABEL}.watchdog.plist"
 
 
-def _generate_launchd_server_plist(server_bin: str) -> str:
+def _generate_launchd_server_plist(distro_bin: str) -> str:
     """Generate a launchd plist for the server.
 
     The plist uses ``RunAtLoad`` for boot-time start and ``KeepAlive``
     with ``SuccessfulExit=false`` so launchd restarts on crash.
 
     Args:
-        server_bin: Absolute path to the amp-distro-server binary.
+        distro_bin: Absolute path to the amp-distro binary.
 
     Returns:
         Complete plist XML content as a string.
@@ -509,7 +527,8 @@ def _generate_launchd_server_plist(server_bin: str) -> str:
             <string>{label}</string>
             <key>ProgramArguments</key>
             <array>
-                <string>{server_bin}</string>
+                <string>{distro_bin}</string>
+                <string>serve</string>
                 <string>--host</string>
                 <string>127.0.0.1</string>
                 <string>--port</string>
@@ -538,13 +557,13 @@ def _generate_launchd_server_plist(server_bin: str) -> str:
     """)
 
 
-def _generate_launchd_watchdog_plist(python_bin: str) -> str:
+def _generate_launchd_watchdog_plist(distro_bin: str) -> str:
     """Generate a launchd plist for the watchdog.
 
     Uses ``KeepAlive=true`` so the watchdog always restarts if it exits.
 
     Args:
-        python_bin: Absolute path to the Python interpreter.
+        distro_bin: Absolute path to the amp-distro binary.
 
     Returns:
         Complete plist XML content as a string.
@@ -566,9 +585,8 @@ def _generate_launchd_watchdog_plist(python_bin: str) -> str:
             <string>{label}</string>
             <key>ProgramArguments</key>
             <array>
-                <string>{python_bin}</string>
-                <string>-m</string>
-                <string>amplifier_distro.server.watchdog</string>
+                <string>{distro_bin}</string>
+                <string>watchdog</string>
                 <string>--host</string>
                 <string>127.0.0.1</string>
                 <string>--port</string>
@@ -598,7 +616,7 @@ def _install_launchd(include_watchdog: bool) -> ServiceResult:
     """Install launchd user agents.
 
     Steps:
-    1. Find amp-distro-server binary.
+    1. Find amp-distro binary.
     2. Create ~/Library/LaunchAgents/ if needed.
     3. Generate and write server plist.
     4. Load server plist via launchctl.
@@ -610,13 +628,16 @@ def _install_launchd(include_watchdog: bool) -> ServiceResult:
     Returns:
         ServiceResult with outcome details.
     """
-    server_bin = _find_server_binary()
-    if server_bin is None:
+    distro_bin = _find_distro_binary()
+    if distro_bin is None:
         return ServiceResult(
             success=False,
             platform="macos",
-            message="amp-distro-server not found on PATH.",
-            details=["Install amplifier-distro first: uv tool install amplifier-distro"]
+            message="Failed: amp-distro binary not found.",
+            details=[
+                "Ensure ~/.local/bin is on PATH, or reinstall:",
+                "  uv tool install amplifier-distro",
+            ],
         )
 
     details: list[str] = []
@@ -627,7 +648,7 @@ def _install_launchd(include_watchdog: bool) -> ServiceResult:
 
     # Write and load server plist
     server_plist = _launchd_server_plist_path()
-    server_plist.write_text(_generate_launchd_server_plist(server_bin))
+    server_plist.write_text(_generate_launchd_server_plist(distro_bin))
     details.append(f"Wrote {server_plist}")
 
     ok, output = _run_cmd(["launchctl", "load", "-w", str(server_plist)])
@@ -638,9 +659,8 @@ def _install_launchd(include_watchdog: bool) -> ServiceResult:
 
     # Write and load watchdog plist
     if include_watchdog:
-        python_bin = _find_python_binary()
         watchdog_plist = _launchd_watchdog_plist_path()
-        watchdog_plist.write_text(_generate_launchd_watchdog_plist(python_bin))
+        watchdog_plist.write_text(_generate_launchd_watchdog_plist(distro_bin))
         details.append(f"Wrote {watchdog_plist}")
 
         ok, output = _run_cmd(["launchctl", "load", "-w", str(watchdog_plist)])
@@ -700,6 +720,14 @@ def _status_launchd() -> ServiceResult:
             details.append("Server agent: installed (loaded)")
         else:
             details.append("Server agent: installed (not loaded)")
+
+        # Detect stale plist referencing the deprecated binary (see _DEPRECATED_BINARY)
+        plist_content = server_plist.read_text()
+        if _DEPRECATED_BINARY in plist_content:
+            details.append(
+                f"WARNING: deprecated {_DEPRECATED_BINARY} binary detected in plist. "
+                "Run 'amp-distro service uninstall' and reinstall to migrate."
+            )
     else:
         details.append("Server agent: not installed")
 

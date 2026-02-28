@@ -35,6 +35,9 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from amplifier_distro import conventions
+from amplifier_distro.doctor import CheckStatus, run_diagnostics
+
 logger = logging.getLogger(__name__)
 
 # Optional bearer token scheme (auto_error=False so missing header
@@ -205,6 +208,51 @@ class DistroServer:
                 }
                 for name, m in self._apps.items()
             }
+
+        @self._core_router.get("/status")
+        async def status() -> JSONResponse:
+            """Preflight status endpoint used by the Settings UI."""
+            from amplifier_distro.server.stub import is_stub_mode, stub_preflight_status
+
+            if is_stub_mode():
+                return JSONResponse(content=stub_preflight_status())
+
+            amplifier_home = Path(conventions.AMPLIFIER_HOME).expanduser()
+            distro_home = Path(conventions.DISTRO_HOME).expanduser()
+            report = run_diagnostics(
+                amplifier_home=amplifier_home,
+                distro_home=distro_home,
+            )
+
+            checks = []
+            for check in report.checks:
+                if check.status == CheckStatus.ok:
+                    severity = "info"
+                    check_passed = True
+                elif check.status == CheckStatus.warning:
+                    severity = "warning"
+                    check_passed = False
+                else:
+                    severity = "error"
+                    check_passed = False
+
+                checks.append(
+                    {
+                        "name": check.name,
+                        "passed": check_passed,
+                        "message": check.message,
+                        "severity": severity,
+                    }
+                )
+
+            passed = not any(c["severity"] == "error" for c in checks)
+
+            return JSONResponse(
+                content={
+                    "passed": passed,
+                    "checks": checks,
+                }
+            )
 
         @self._core_router.get("/integrations")
         async def get_integrations() -> JSONResponse:
