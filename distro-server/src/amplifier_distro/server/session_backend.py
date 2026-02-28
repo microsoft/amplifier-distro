@@ -403,8 +403,20 @@ class FoundationBackend:
                 )
 
     def _compute_bundle_version(self) -> str:
-        """Return a version string based on overlay file mtime. Stub — see Task 10."""
-        return ""
+        """Return a version string based on overlay bundle.yaml mtime.
+
+        Uses the modification time of bundle.yaml as a cheap staleness signal.
+        Sessions store this at creation time so they can detect a bundle upgrade.
+        Returns '' if no overlay exists or bundle.yaml is absent.
+        """
+        from amplifier_distro.overlay import overlay_dir, overlay_exists
+
+        if not overlay_exists():
+            return ""
+        path = overlay_dir() / "bundle.yaml"
+        if not path.exists():
+            return ""
+        return str(path.stat().st_mtime)
 
     def _wire_event_queue(
         self, session: Any, session_id: str, event_queue: asyncio.Queue
