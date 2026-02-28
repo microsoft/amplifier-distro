@@ -321,3 +321,68 @@ class TestHeadlessSurface:
 
         surface = headless_surface()
         assert surface.on_bundle_reload is None
+
+
+# ── web_chat_surface() ─────────────────────────────────────────────────────────
+
+
+class TestWebChatSurface:
+    def test_web_chat_surface_returns_session_surface(self):
+        from amplifier_distro.server.protocol_adapters import (
+            SessionSurface,
+            web_chat_surface,
+        )
+
+        q: asyncio.Queue = asyncio.Queue()
+        assert isinstance(web_chat_surface(q), SessionSurface)
+
+    def test_web_chat_surface_stores_queue(self):
+        from amplifier_distro.server.protocol_adapters import web_chat_surface
+
+        q: asyncio.Queue = asyncio.Queue()
+        surface = web_chat_surface(q)
+        assert surface.event_queue is q
+
+    def test_web_chat_surface_has_interactive_approval_system(self):
+        from amplifier_distro.server.protocol_adapters import (
+            ApprovalSystem,
+            web_chat_surface,
+        )
+
+        q: asyncio.Queue = asyncio.Queue()
+        surface = web_chat_surface(q)
+        assert isinstance(surface.approval_system, ApprovalSystem)
+        assert surface.approval_system._auto_approve is False
+
+    def test_web_chat_surface_has_queue_display_system(self):
+        from amplifier_distro.server.protocol_adapters import (
+            QueueDisplaySystem,
+            web_chat_surface,
+        )
+
+        q: asyncio.Queue = asyncio.Queue()
+        surface = web_chat_surface(q)
+        assert isinstance(surface.display_system, QueueDisplaySystem)
+
+    async def test_web_chat_surface_approval_request_pushes_to_queue(self):
+        from amplifier_distro.server.protocol_adapters import web_chat_surface
+
+        q: asyncio.Queue = asyncio.Queue()
+        surface = web_chat_surface(q)
+        await surface.approval_system._on_approval_request(
+            "req-001", "Allow tool?", ["allow", "deny"], 300.0, "deny"
+        )
+        event_type, data = q.get_nowait()
+        assert event_type == "approval_request"
+        assert data["request_id"] == "req-001"
+        assert data["prompt"] == "Allow tool?"
+
+    async def test_web_chat_surface_display_pushes_to_queue(self):
+        from amplifier_distro.server.protocol_adapters import web_chat_surface
+
+        q: asyncio.Queue = asyncio.Queue()
+        surface = web_chat_surface(q)
+        await surface.display_system.show_message("Thinking\u2026", level="info", source="hook")
+        event_type, data = q.get_nowait()
+        assert event_type == "display_message"
+        assert data["message"] == "Thinking\u2026"
