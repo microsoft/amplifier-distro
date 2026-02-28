@@ -976,7 +976,7 @@ class TestFoundationBackendBundleCache:
 
         from amplifier_distro.server.session_backend import FoundationBackend
 
-        # Verify the attribute is initialized by __init__ (AttributeError in RED).
+        # AttributeError here in RED (attribute not yet initialized by __init__)
         assert bridge_backend._prepared_bundle is None
         bridge_backend._prepared_bundle = mock_bundle
         result = await FoundationBackend._load_bundle(bridge_backend)
@@ -999,7 +999,7 @@ class TestFoundationBackendBundleCache:
         """
         from amplifier_distro.server.session_backend import FoundationBackend
 
-        # Verify the attribute is initialized by __init__ (AttributeError in RED).
+        # AttributeError here in RED (attribute not yet initialized by __init__)
         assert bridge_backend._prepared_bundle is None
         with pytest.raises(Exception):  # noqa: B017
             await FoundationBackend._load_bundle(bridge_backend)
