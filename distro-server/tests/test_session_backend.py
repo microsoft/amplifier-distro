@@ -1346,3 +1346,50 @@ class TestFoundationBackendComputeBundleVersion:
             version = FoundationBackend._compute_bundle_version(bridge_backend)
 
         assert version == ""
+
+
+class TestSessionHandlePrewarmFields:
+    """RED tests — _SessionHandle does not yet have bundle_version / surface fields.
+
+    These tests are expected to FAIL with:
+        TypeError: _SessionHandle.__init__() got an unexpected keyword argument 'bundle_version'
+
+    Once the fields are added to the dataclass the tests will turn GREEN.
+    """
+
+    def test_session_handle_has_bundle_version_field_defaulting_to_empty_string(self):
+        """bundle_version defaults to '' when not supplied."""
+        from amplifier_distro.server.session_backend import _SessionHandle
+
+        handle = _SessionHandle(
+            session_id="s001",
+            project_id="p001",
+            working_dir=Path("/tmp"),
+            session=None,
+        )
+        assert handle.bundle_version == ""
+
+    def test_session_handle_has_surface_field_defaulting_to_none(self):
+        """surface defaults to None when not supplied."""
+        from amplifier_distro.server.session_backend import _SessionHandle
+
+        handle = _SessionHandle(
+            session_id="s002",
+            project_id="p001",
+            working_dir=Path("/tmp"),
+            session=None,
+        )
+        assert handle.surface is None
+
+    def test_session_handle_accepts_explicit_bundle_version(self):
+        """bundle_version can be set explicitly at construction time."""
+        from amplifier_distro.server.session_backend import _SessionHandle
+
+        handle = _SessionHandle(
+            session_id="s003",
+            project_id="p001",
+            working_dir=Path("/tmp"),
+            session=None,
+            bundle_version="1700000000.0",
+        )
+        assert handle.bundle_version == "1700000000.0"
