@@ -194,3 +194,21 @@ def service_cmd_status() -> None:
     click.echo(f"Status: {result.message}")
     for detail in result.details:
         click.echo(f"  {detail}")
+
+
+# -- Watchdog (hidden: for service supervision only) ---------------------
+
+
+@main.command("watchdog", hidden=True)
+@click.option("--host", default="127.0.0.1", help="Bind host")
+@click.option(
+    "--port",
+    default=conventions.SERVER_DEFAULT_PORT,
+    type=int,
+    help="Bind port",
+)
+def watchdog_cmd(host: str, port: int) -> None:
+    """Run the health watchdog (for service supervision — not user-facing)."""
+    from .server.watchdog import run_watchdog_loop
+
+    run_watchdog_loop(host=host, port=port)

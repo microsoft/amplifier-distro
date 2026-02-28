@@ -1,64 +1,52 @@
-"""Tests for the amp-distro CLI main command group.
+"""Tests for the amp-distro CLI top-level commands.
 
 Tests cover:
-1. Hidden 'watchdog' subcommand visibility
-2. watchdog --help exits cleanly
-3. watchdog delegates to run_watchdog_loop with correct args
-
+1. watchdog subcommand is hidden from --help
+2. watchdog --help exits successfully (command exists)
+3. watchdog subcommand delegates to run_watchdog_loop with correct kwargs
 """
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
 
+from amplifier_distro.cli import main
 
-class TestWatchdogSubcommand:
-    """Verify the hidden 'watchdog' subcommand behavior."""
 
-    @pytest.mark.xfail(
-        reason="RED phase: watchdog CLI subcommand not yet implemented",
-        strict=True,
-    )
-    def test_watchdog_subcommand_hidden(self) -> None:
-        """'watchdog' must NOT appear in 'amp-distro --help' output."""
-        from amplifier_distro.cli import main
+class TestWatchdogCommand:
+    """Verify the hidden watchdog subcommand on the main CLI group."""
 
+    def test_watchdog_hidden_from_help(self) -> None:
+        """'amp-distro --help' must NOT list the watchdog command."""
         runner = CliRunner()
         result = runner.invoke(main, ["--help"])
-
         assert result.exit_code == 0
         assert "watchdog" not in result.output
-        assert "watchdog" in main.commands
 
-    @pytest.mark.xfail(
-        reason="RED phase: watchdog CLI subcommand not yet implemented",
-        strict=True,
-    )
-    def test_watchdog_subcommand_exists(self) -> None:
-        """'amp-distro watchdog --help' must succeed with exit code 0."""
-        from amplifier_distro.cli import main
-
+    def test_watchdog_help_exits_zero(self) -> None:
+        """'amp-distro watchdog --help' must exit with code 0 (command exists)."""
         runner = CliRunner()
         result = runner.invoke(main, ["watchdog", "--help"])
-
         assert result.exit_code == 0
 
-    @pytest.mark.xfail(
-        reason="RED phase: watchdog CLI subcommand not yet implemented",
-        strict=True,
-    )
-    @patch("amplifier_distro.server.watchdog.run_watchdog_loop")
-    def test_watchdog_delegates_to_run_watchdog_loop(
-        self, mock_loop: MagicMock
-    ) -> None:
-        """watchdog --host X --port Y calls run_watchdog_loop(host=X, port=Y)."""
-        from amplifier_distro.cli import main
-
+    def test_watchdog_calls_run_watchdog_loop_with_host_and_port(self) -> None:
+        """watchdog subcommand calls run_watchdog_loop with correct host and port."""
         runner = CliRunner()
-        result = runner.invoke(
-            main, ["watchdog", "--host", "0.0.0.0", "--port", "9000"]
-        )
+        mock_loop = MagicMock()
+        # Patch the module where the symbol lives, not amplifier_distro.cli, because
+        # the import happens inside the function body (lazy import) — at call time the
+        # name is resolved from amplifier_distro.server.watchdog, not the CLI module.
+        with patch("amplifier_distro.server.watchdog.run_watchdog_loop", mock_loop):
+            result = runner.invoke(
+                main,
+                [
+                    "watchdog",
+                    "--host",
+                    "0.0.0.0",
+                    "--port",
+                    "9999",
+                ],
+            )
 
         assert result.exit_code == 0
-        mock_loop.assert_called_once_with(host="0.0.0.0", port=9000)
+        mock_loop.assert_called_once_with(host="0.0.0.0", port=9999)
