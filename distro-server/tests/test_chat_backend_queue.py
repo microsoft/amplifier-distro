@@ -7,25 +7,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from amplifier_distro.server.protocol_adapters import web_chat_surface
 from amplifier_distro.server.session_backend import FoundationBackend, MockBackend
 
 
 class TestMockBackendQueueIgnored:
-    """MockBackend gracefully ignores surface= (it doesn't stream)."""
+    """MockBackend gracefully ignores event_queue (it doesn't stream)."""
 
     @pytest.mark.asyncio
     async def test_create_session_accepts_event_queue(self):
         backend = MockBackend()
         q: asyncio.Queue = asyncio.Queue()
-        info = await backend.create_session(
-            working_dir="~", surface=web_chat_surface(q)
-        )
+        info = await backend.create_session(working_dir="~", event_queue=q)
         assert info.session_id is not None
 
 
 class TestFoundationBackendQueueWiring:
-    """FoundationBackend wires event hooks via _attach_surface when surface= given."""
+    """FoundationBackend wires event_queue via _wire_event_queue."""
 
     @pytest.fixture()
     def bare_backend(self) -> FoundationBackend:
@@ -54,7 +51,7 @@ class TestFoundationBackendQueueWiring:
     async def test_create_session_wires_on_stream_when_queue_provided(
         self, bare_backend
     ):
-        """When surface= is provided, hooks.register is called for streaming."""
+        """When event_queue is provided, hooks.register is called for streaming."""
         mock_session = self._mock_session("test-session-001")
         mock_prepared = MagicMock()
         mock_prepared.create_session = AsyncMock(return_value=mock_session)
@@ -63,9 +60,7 @@ class TestFoundationBackendQueueWiring:
         q: asyncio.Queue = asyncio.Queue()
 
         with patch("asyncio.create_task"):
-            await bare_backend.create_session(
-                working_dir="~", surface=web_chat_surface(q)
-            )
+            await bare_backend.create_session(working_dir="~", event_queue=q)
 
         # hooks.register should have been called (for streaming wiring)
         mock_session.coordinator.hooks.register.assert_called()

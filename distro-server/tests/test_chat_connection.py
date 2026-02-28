@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import ANY, AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -166,10 +166,8 @@ class TestReceiveLoop:
         backend.resume_session.assert_awaited_once_with(
             "sess-resume-123",
             "/tmp/resume",
-            surface=ANY,
+            event_queue=conn.event_queue,
         )
-        call_kwargs = backend.resume_session.await_args.kwargs
-        assert call_kwargs["surface"].event_queue is conn.event_queue
         backend.create_session.assert_not_awaited()
 
         sent = [call.args[0] for call in ws.send_json.await_args_list]

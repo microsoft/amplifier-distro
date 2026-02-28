@@ -4,7 +4,7 @@ One instance per WebSocket connection. Owns:
   - _auth_handshake(): validate token if api_key is configured
   - _receive_loop(): read client messages, dispatch to backend
   - _event_fanout_loop(): drain asyncio.Queue, translate, send to WS
-  - event_queue: asyncio.Queue drained by _event_fanout_loop
+  - event_queue: asyncio.Queue wired to FoundationBackend.on_stream
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any
 from starlette.websockets import WebSocketDisconnect
 
 from amplifier_distro.server.apps.chat.translator import SessionEventTranslator
-from amplifier_distro.server.protocol_adapters import web_chat_surface
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -238,7 +237,7 @@ class ChatConnection:
                 await self._backend.resume_session(
                     str(resume_session_id),
                     cwd,
-                    surface=web_chat_surface(self.event_queue),
+                    event_queue=self.event_queue,
                 )
                 info = await self._backend.get_session_info(str(resume_session_id))
                 session_id = (
@@ -253,7 +252,7 @@ class ChatConnection:
                 info = await self._backend.create_session(
                     working_dir=cwd,
                     bundle_name=bundle,
-                    surface=web_chat_surface(self.event_queue),
+                    event_queue=self.event_queue,
                 )
                 session_id = info.session_id
                 session_cwd = str(info.working_dir)
@@ -333,7 +332,7 @@ class ChatConnection:
                         await self._backend.end_session(self._session_id)
                 info = await self._backend.create_session(
                     bundle_name=new_bundle,
-                    surface=web_chat_surface(self.event_queue),
+                    event_queue=self.event_queue,
                 )
                 self._session_id = info.session_id
                 self._translator.reset()
@@ -346,7 +345,7 @@ class ChatConnection:
                         await self._backend.end_session(self._session_id)
                 info = await self._backend.create_session(
                     working_dir=new_cwd,
-                    surface=web_chat_surface(self.event_queue),
+                    event_queue=self.event_queue,
                 )
                 self._session_id = info.session_id
                 self._translator.reset()
@@ -389,11 +388,9 @@ class ChatConnection:
         hook_names = [h.get("module", "unknown") for h in hooks]
 
         # Extract agent names (filter structural keys)
-        agent_names = (
-            sorted(k for k in agents if k not in ("dirs", "include", "inline"))
-            if isinstance(agents, dict)
-            else []
-        )
+        agent_names = sorted(
+            k for k in agents if k not in ("dirs", "include", "inline")
+        ) if isinstance(agents, dict) else []
 
         # Orchestrator / context
         orch = session.get("orchestrator", "unknown")

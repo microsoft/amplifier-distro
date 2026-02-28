@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from amplifier_distro.server.protocol_adapters import ApprovalSystem, web_chat_surface
+from amplifier_distro.server.protocol_adapters import ApprovalSystem
 
 
 class TestApprovalSystemAutoApprove:
@@ -200,9 +200,7 @@ async def test_create_session_with_event_queue_pushes_approval_request():
     event_queue: asyncio.Queue = asyncio.Queue()
 
     with patch("asyncio.create_task"):
-        await backend.create_session(
-            working_dir="~", surface=web_chat_surface(event_queue)
-        )
+        await backend.create_session(working_dir="~", event_queue=event_queue)
 
     # Trigger the approval system directly (simulates kernel calling it)
     approval = backend._approval_systems["eq-test-001"]
@@ -271,9 +269,7 @@ async def test_create_session_populates_approval_systems():
     event_queue: asyncio.Queue = asyncio.Queue()
 
     with patch("asyncio.create_task"):
-        await backend.create_session(
-            working_dir="~", surface=web_chat_surface(event_queue)
-        )
+        await backend.create_session(working_dir="~", event_queue=event_queue)
 
     assert "approval-wire-001" in backend._approval_systems
     approval = backend._approval_systems["approval-wire-001"]

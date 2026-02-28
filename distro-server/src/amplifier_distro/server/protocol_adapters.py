@@ -11,30 +11,10 @@ import asyncio
 import inspect
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class SessionSurface:
-    """Container for the surface dependencies of a single agent session.
-
-    web_chat_surface: Fully wired surface with event_queue, approval_system,
-      display_system, and on_bundle_reload — used when a WebSocket client is
-      connected and the session is interactive.
-
-    headless_surface: All fields are None (defaults) — used when running
-      without a client (e.g. batch/CLI mode) where no queue or interactive
-      approval is needed.
-    """
-
-    event_queue: asyncio.Queue | None = field(default=None)  # type: ignore[type-arg]
-    approval_system: Any | None = field(default=None)
-    display_system: Any | None = field(default=None)
-    on_bundle_reload: Callable[[], Awaitable[None]] | None = field(default=None)
 
 
 class ApprovalSystem:
@@ -140,97 +120,3 @@ class QueueDisplaySystem:
     @property
     def nesting_depth(self) -> int:
         return self._nesting_depth
-
-
-class LogDisplaySystem:
-    """Display system that routes messages to the Python logging framework.
-
-    Satisfies the display protocol for headless surfaces (no queue, no WebSocket).
-    All show_message() calls are forwarded to the 'amplifier_distro.display' logger.
-    push_nesting() and pop_nesting() return self (nesting is a no-op).
-    """
-
-    def __init__(self) -> None:
-        self._logger = logging.getLogger("amplifier_distro.display")
-
-    async def show_message(
-        self,
-        message: str,
-        level: Literal["info", "warning", "error"] = "info",
-        source: str = "hook",
-    ) -> None:
-        log_level = {
-            "info": logging.INFO,
-            "warning": logging.WARNING,
-            "error": logging.ERROR,
-        }[level]
-        self._logger.log(log_level, "[%s] %s", source, message)
-
-    def push_nesting(self) -> LogDisplaySystem:
-        return self
-
-    def pop_nesting(self) -> LogDisplaySystem:
-        return self
-
-    @property
-    def nesting_depth(self) -> int:
-        return 0
-
-
-def headless_surface() -> SessionSurface:
-    """Create a SessionSurface for headless execution contexts.
-
-    Intended for Slack messages, recipes, and scheduled jobs — environments
-    where there is no browser WebSocket connection. Approvals are
-    auto-approved and display messages are routed to the Python logging
-    framework via LogDisplaySystem.
-    """
-    return SessionSurface(
-        approval_system=ApprovalSystem(auto_approve=True),
-        display_system=LogDisplaySystem(),
-    )
-
-
-def web_chat_surface(queue: asyncio.Queue) -> SessionSurface:  # type: ignore[type-arg]
-    """Create a SessionSurface for interactive web chat connections.
-
-    Intended for browser WebSocket connections where approvals are interactive
-    and display messages are pushed to the client via the event queue.
-    Approval requests are pushed as ('approval_request', {...}) tuples.
-    Display messages are pushed as ('display_message', {...}) tuples.
-    """
-
-    async def _on_approval_request(
-        request_id: str,
-        prompt: str,
-        options: list[str],
-        timeout: float,
-        default: str,
-    ) -> None:
-        try:
-            queue.put_nowait(
-                (
-                    "approval_request",
-                    {
-                        "request_id": request_id,
-                        "prompt": prompt,
-                        "options": options,
-                        "timeout": timeout,
-                        "default": default,
-                    },
-                )
-            )
-        except asyncio.QueueFull:
-            logger.warning(
-                "Queue full; approval_request event dropped for request_id=%s",
-                request_id,
-            )
-
-    return SessionSurface(
-        event_queue=queue,
-        approval_system=ApprovalSystem(
-            on_approval_request=_on_approval_request,
-            auto_approve=False,
-        ),
-        display_system=QueueDisplaySystem(queue),
-    )
