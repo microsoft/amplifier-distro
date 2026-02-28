@@ -370,6 +370,20 @@ class FoundationBackend:
                 exc_info=True,
             )
 
+    async def reload_bundle(self) -> None:
+        """Invalidate the bundle cache and reload from scratch.
+        Called after overlay writes so a server restart isn't needed.
+        After reloading, notifies all active sessions via their surface's
+        on_bundle_reload callback (each surface defines its own restart policy).
+        """
+        logger.info("Reloading bundle...")
+        self._prepared_bundle = None  # Invalidate cache so _load_bundle() does real I/O
+        self._prepared_bundle = await self._load_bundle()
+        self._bundle_version = self._compute_bundle_version()
+        logger.info("Bundle reloaded")
+
+        # Notify active session surfaces (surface notification loop added in Task 7-8)
+
     def _compute_bundle_version(self) -> str:
         """Return a version string based on overlay file mtime. Stub — see Task 10."""
         return ""
