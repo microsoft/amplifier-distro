@@ -378,7 +378,11 @@ class FoundationBackend:
         """
         logger.info("Reloading bundle...")
         self._prepared_bundle = None  # Invalidate cache so _load_bundle() does real I/O
-        self._prepared_bundle = await self._load_bundle()
+        try:
+            self._prepared_bundle = await self._load_bundle()
+        except Exception:
+            logger.warning("Bundle reload failed", exc_info=True)
+            raise
         self._bundle_version = self._compute_bundle_version()
         logger.info("Bundle reloaded")
 
