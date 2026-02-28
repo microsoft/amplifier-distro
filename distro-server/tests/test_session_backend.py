@@ -1142,3 +1142,45 @@ class TestMockBackendNewMethods:
         q: asyncio.Queue = asyncio.Queue()
         await backend.resume_session("s", "~", event_queue=q)
         assert any(c["method"] == "resume_session" for c in backend.calls)
+
+
+# ── FoundationBackend.reload_bundle ────────────────────────────────────────────
+
+
+class TestFoundationBackendReloadBundle:
+    """reload_bundle() must invalidate the bundle cache and reload a fresh bundle."""
+
+    async def test_reload_bundle_clears_and_reloads(self, bridge_backend):
+        """reload_bundle() clears _prepared_bundle and calls _load_bundle() once."""
+        old_bundle = MagicMock(name="old_bundle")
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._prepared_bundle = old_bundle
+
+        load_calls = []
+
+        async def fake_load_bundle(*args, **kwargs):
+            load_calls.append(True)
+            return new_bundle
+
+        bridge_backend._load_bundle = fake_load_bundle
+        bridge_backend._compute_bundle_version = MagicMock(return_value="new-version")
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)
+
+        assert bridge_backend._prepared_bundle is new_bundle
+        assert bridge_backend._prepared_bundle is not old_bundle
+        assert len(load_calls) == 1
+
+    async def test_reload_bundle_updates_bundle_version(self, bridge_backend):
+        """reload_bundle() stores the new computed version in _bundle_version."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="9999.0")
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)
+
+        assert bridge_backend._bundle_version == "9999.0"
