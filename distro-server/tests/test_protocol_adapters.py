@@ -378,6 +378,7 @@ class TestWebChatSurface:
         assert event_type == "approval_request"
         assert data["request_id"] == "req-001"
         assert data["prompt"] == "Allow tool?"
+        # options/timeout/default checked in integration tests
 
     async def test_web_chat_surface_display_pushes_to_queue(self):
         from amplifier_distro.server.protocol_adapters import web_chat_surface
