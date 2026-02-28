@@ -95,15 +95,18 @@ class DistroServer:
         title: str = "Amplifier Distro",
         version: str = "0.1.0",
         dev_mode: bool = False,
+        host: str = "127.0.0.1",
     ) -> None:
         self._apps: dict[str, AppManifest] = {}
         self._dev_mode = dev_mode
+        self._host = host
         self._app = FastAPI(
             title=title,
             version=version,
             docs_url="/api/docs",
             openapi_url="/api/openapi.json",
         )
+        self._app.state.host = host
         self._core_router = APIRouter(prefix="/api", tags=["core"])
         self._setup_core_routes()
         self._setup_bridge_routes()

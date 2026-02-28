@@ -574,3 +574,19 @@ class TestApiKeyAuth:
         body = resp.json()
         assert "detail" in body
         assert "API key" in body["detail"]
+
+
+class TestHostThreading:
+    """Verify --host flows through DistroServer to app.state."""
+
+    def test_default_host_is_localhost(self):
+        server = DistroServer()
+        assert server.app.state.host == "127.0.0.1"
+
+    def test_custom_host_stored_on_app_state(self):
+        server = DistroServer(host="0.0.0.0")
+        assert server.app.state.host == "0.0.0.0"
+
+    def test_create_server_passes_host(self):
+        server = create_server(host="192.168.1.50")
+        assert server.app.state.host == "192.168.1.50"

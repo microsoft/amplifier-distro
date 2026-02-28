@@ -406,7 +406,7 @@ def _run_foreground(
     services = init_services(dev_mode=dev)
     click.echo(f"Services: backend={type(services.backend).__name__}")
 
-    server = create_server(dev_mode=dev)
+    server = create_server(dev_mode=dev, host=host)
 
     # Auto-discover apps
     loaded_apps: list[str] = []
