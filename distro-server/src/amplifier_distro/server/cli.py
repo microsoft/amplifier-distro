@@ -466,6 +466,8 @@ def _run_foreground(
             reload=True,
             factory=True,
             log_level="info",
+            ws_ping_interval=20,
+            ws_ping_timeout=20,
         )
     else:
         uvicorn.run(
@@ -473,6 +475,8 @@ def _run_foreground(
             host=host,
             port=port,
             log_level="info",
+            ws_ping_interval=20,
+            ws_ping_timeout=20,
         )
 
 
