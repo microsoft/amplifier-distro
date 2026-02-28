@@ -196,6 +196,7 @@ async def test_create_session_with_event_queue_pushes_approval_request():
     backend._ended_sessions = set()
     backend._wired_sessions = set()
     backend._approval_systems = {}
+    backend._bundle_version = ""
 
     event_queue: asyncio.Queue = asyncio.Queue()
 
@@ -267,6 +268,7 @@ async def test_create_session_populates_approval_systems():
     backend._ended_sessions = set()
     backend._wired_sessions = set()
     backend._approval_systems = {}
+    backend._bundle_version = ""
 
     event_queue: asyncio.Queue = asyncio.Queue()
 

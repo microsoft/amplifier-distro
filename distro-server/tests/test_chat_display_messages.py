@@ -55,6 +55,7 @@ class TestDisplayMessageQueueWiring:
         backend._ended_sessions = set()
         backend._wired_sessions = set()
         backend._approval_systems = {}
+        backend._bundle_version = ""
 
         q: asyncio.Queue = asyncio.Queue()
 
@@ -91,6 +92,7 @@ class TestDisplayMessageQueueWiring:
         backend._ended_sessions = set()
         backend._wired_sessions = set()
         backend._approval_systems = {}
+        backend._bundle_version = ""
 
         with patch("asyncio.create_task"):
             # no event_queue — headless_surface is used

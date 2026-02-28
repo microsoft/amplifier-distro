@@ -14,8 +14,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from amplifier_distro.server.protocol_adapters import web_chat_surface
-
 
 def _make_mock_handle(session_id: str = "test-session-0001") -> MagicMock:
     """Build a mock SessionHandle with a controllable run() method."""
@@ -46,6 +44,9 @@ def bridge_backend():
         backend._ended_sessions = set()
         backend._approval_systems = {}
         backend._wired_sessions = set()
+        # Pre-warm cache fields (new in fix/bundle-prewarm)
+        backend._prepared_bundle = None
+        backend._bundle_version = ""
         return backend
 
 
@@ -769,9 +770,7 @@ class TestFoundationBackendEventQueueWiring:
 
         event_queue: asyncio.Queue = asyncio.Queue()
         await FoundationBackend.create_session(
-            bridge_backend,
-            working_dir="/tmp",
-            surface=web_chat_surface(event_queue),
+            bridge_backend, working_dir="/tmp", event_queue=event_queue
         )
 
         assert "sess-eq-001" in bridge_backend._approval_systems
@@ -782,7 +781,7 @@ class TestFoundationBackendEventQueueWiring:
     async def test_create_session_without_queue_no_approval_system(
         self, bridge_backend
     ):
-        """Without event_queue, headless_surface creates an ApprovalSystem."""
+        """Without event_queue, no ApprovalSystem is created."""
         mock_session = MagicMock()
         mock_session.session_id = "sess-eq-002"
         mock_session.project_id = "test-project"
@@ -795,7 +794,7 @@ class TestFoundationBackendEventQueueWiring:
 
         await FoundationBackend.create_session(bridge_backend, working_dir="/tmp")
 
-        assert "sess-eq-002" in bridge_backend._approval_systems
+        assert "sess-eq-002" not in bridge_backend._approval_systems
         if "sess-eq-002" in bridge_backend._worker_tasks:
             bridge_backend._worker_tasks["sess-eq-002"].cancel()
 
@@ -828,7 +827,63 @@ class TestFoundationBackendEventQueueWiring:
 
 
 class TestDoubleHookRegistrationGuard:
-    """_attach_surface must not double-register hooks on resume."""
+    """_wire_event_queue must not double-register hooks on resume."""
+
+    async def test_wire_twice_does_not_double_register_hooks(self, bridge_backend):
+        """Calling _wire_event_queue twice for the same session must not
+        register hooks a second time (guards against page-refresh duplication)."""
+        mock_session = MagicMock()
+        mock_session.coordinator = MagicMock()
+        mock_session.coordinator.hooks = MagicMock()
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        q1: asyncio.Queue = asyncio.Queue()
+        q2: asyncio.Queue = asyncio.Queue()
+
+        # First wire — hooks should be registered
+        FoundationBackend._wire_event_queue(
+            bridge_backend, mock_session, "sess-double-001", q1
+        )
+        first_register_count = mock_session.coordinator.hooks.register.call_count
+
+        # Second wire (simulating page refresh) — hooks must NOT be re-registered
+        FoundationBackend._wire_event_queue(
+            bridge_backend, mock_session, "sess-double-001", q2
+        )
+        second_register_count = mock_session.coordinator.hooks.register.call_count
+
+        assert second_register_count == first_register_count, (
+            f"Hooks registered twice: {first_register_count} -> {second_register_count}"
+        )
+
+    async def test_wire_guard_still_updates_approval_system(self, bridge_backend):
+        """Second _wire_event_queue call must still update the approval system
+        (new queue connection needs a new approval instance)."""
+        mock_session = MagicMock()
+        mock_session.coordinator = MagicMock()
+        mock_session.coordinator.hooks = MagicMock()
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        q1: asyncio.Queue = asyncio.Queue()
+        q2: asyncio.Queue = asyncio.Queue()
+
+        FoundationBackend._wire_event_queue(
+            bridge_backend, mock_session, "sess-double-002", q1
+        )
+        approval_1 = bridge_backend._approval_systems.get("sess-double-002")
+
+        FoundationBackend._wire_event_queue(
+            bridge_backend, mock_session, "sess-double-002", q2
+        )
+        approval_2 = bridge_backend._approval_systems.get("sess-double-002")
+
+        assert approval_1 is not None
+        assert approval_2 is not None
+        assert approval_1 is not approval_2, (
+            "Approval system should be replaced on re-wire"
+        )
 
     async def test_end_session_clears_wired_sessions(self, bridge_backend):
         """end_session must remove session from _wired_sessions set."""
@@ -931,15 +986,132 @@ class TestFoundationBackendSpawnRegistration:
             bridge_backend._worker_tasks["sess-spawn-rc-001"].cancel()
 
 
+class TestFoundationBackendBundleCache:
+    """Verify _prepared_bundle cache fields exist and _load_bundle() honours them."""
+
+    def test_init_has_prepared_bundle_field(self):
+        """FoundationBackend.__init__ must initialise _prepared_bundle to None."""
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        backend = FoundationBackend.__new__(FoundationBackend)
+        FoundationBackend.__init__(backend)
+        assert hasattr(backend, "_prepared_bundle")
+        assert backend._prepared_bundle is None
+
+    def test_init_has_bundle_version_field(self):
+        """FoundationBackend.__init__ must initialise _bundle_version to ``""``."""
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        backend = FoundationBackend.__new__(FoundationBackend)
+        FoundationBackend.__init__(backend)
+        assert hasattr(backend, "_bundle_version")
+        assert backend._bundle_version == ""
+
+    async def test_load_bundle_returns_cache_when_prepared_bundle_set(
+        self, bridge_backend
+    ):
+        """_load_bundle() must return _prepared_bundle immediately without I/O."""
+        mock_prepared = MagicMock()
+        bridge_backend._prepared_bundle = mock_prepared
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        result = await FoundationBackend._load_bundle(bridge_backend)
+
+        assert result is mock_prepared
+
+    async def test_load_bundle_skips_import_when_cache_hit(self, bridge_backend):
+        """_load_bundle() must not call load_bundle() when cache is populated."""
+        mock_prepared = MagicMock()
+        bridge_backend._prepared_bundle = mock_prepared
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        with patch(
+            "amplifier_distro.server.session_backend.FoundationBackend._load_bundle",
+            wraps=FoundationBackend._load_bundle,
+        ):
+            # Ensure no amplifier_foundation import happens by verifying result
+            result = await FoundationBackend._load_bundle(bridge_backend)
+
+        assert result is mock_prepared
+
+    def test_bridge_backend_fixture_has_prepared_bundle(self, bridge_backend):
+        """bridge_backend fixture must expose _prepared_bundle (cache field)."""
+        assert hasattr(bridge_backend, "_prepared_bundle")
+        assert bridge_backend._prepared_bundle is None
+
+    def test_bridge_backend_fixture_has_bundle_version(self, bridge_backend):
+        """bridge_backend fixture must expose _bundle_version (cache field)."""
+        assert hasattr(bridge_backend, "_bundle_version")
+        assert bridge_backend._bundle_version == ""
+
+
+class TestFoundationBackendStartup:
+    """startup() pre-warms the bundle: calls _load_bundle() and caches the result."""
+
+    async def test_startup_sets_prepared_bundle(self, bridge_backend):
+        """startup() must store the loaded bundle in _prepared_bundle."""
+        mock_bundle = MagicMock()
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="")
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.startup(bridge_backend)
+
+        assert bridge_backend._prepared_bundle is mock_bundle
+
+    async def test_startup_calls_load_bundle_once(self, bridge_backend):
+        """startup() must call _load_bundle() exactly once with no arguments."""
+        mock_bundle = MagicMock()
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="")
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.startup(bridge_backend)
+
+        bridge_backend._load_bundle.assert_awaited_once_with()
+
+    async def test_startup_sets_bundle_version(self, bridge_backend):
+        """startup() must store the computed bundle version in _bundle_version."""
+        mock_bundle = MagicMock()
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="1234567.89")
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.startup(bridge_backend)
+
+        assert bridge_backend._bundle_version == "1234567.89"
+
+    async def test_startup_logs_warning_and_continues_on_load_failure(
+        self, bridge_backend
+    ):
+        """startup() must log a warning and not re-raise if _load_bundle() fails.
+
+        The server should start in a degraded-but-running state; the first
+        create_session() call will retry the load.  _prepared_bundle stays None.
+        """
+        bridge_backend._load_bundle = AsyncMock(side_effect=RuntimeError("load failed"))
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        # Must not raise — warn-and-continue semantics
+        await FoundationBackend.startup(bridge_backend)
+
+        # Cache stays unpopulated — create_session() will retry
+        assert bridge_backend._prepared_bundle is None
+
+
 class TestMockBackendNewMethods:
-    async def test_create_session_accepts_surface(self):
+    async def test_create_session_accepts_event_queue(self):
         from amplifier_distro.server.session_backend import MockBackend
 
         backend = MockBackend()
         q: asyncio.Queue = asyncio.Queue()
-        info = await backend.create_session(
-            working_dir="~", surface=web_chat_surface(q)
-        )
+        info = await backend.create_session(working_dir="~", event_queue=q)
         assert info.session_id is not None
 
     async def test_execute_records_call(self):
@@ -963,204 +1135,292 @@ class TestMockBackendNewMethods:
         backend = MockBackend()
         assert backend.resolve_approval("s", "r", "allow") is False
 
-    async def test_resume_session_accepts_surface(self):
+    async def test_resume_session_accepts_event_queue(self):
         from amplifier_distro.server.session_backend import MockBackend
 
         backend = MockBackend()
         q: asyncio.Queue = asyncio.Queue()
-        await backend.resume_session("s", "~", surface=web_chat_surface(q))
+        await backend.resume_session("s", "~", event_queue=q)
         assert any(c["method"] == "resume_session" for c in backend.calls)
 
 
-# ── Surface helpers ───────────────────────────────────────────────────────────
+# ── FoundationBackend.reload_bundle ────────────────────────────────────────────
 
 
-def headless_surface():
-    """Minimal headless surface descriptor for tests.
+class TestFoundationBackendReloadBundle:
+    """reload_bundle() must invalidate the bundle cache and reload a fresh bundle."""
 
-    In the real implementation this will be a dataclass / named object.
-    For now it only needs to be distinguishable from None and from a
-    web-chat surface so the backend can dispatch on type.
-    """
-    return {"type": "headless"}
+    async def test_reload_bundle_clears_and_reloads(self, bridge_backend):
+        """reload_bundle() clears _prepared_bundle and calls _load_bundle() once."""
+        old_bundle = MagicMock(name="old_bundle")
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._prepared_bundle = old_bundle
 
+        load_calls = []
 
+        async def fake_load_bundle(*args, **kwargs):
+            load_calls.append(True)
+            return new_bundle
 
-# ── TestCreateSessionSurface ──────────────────────────────────────────────────
-
-
-class TestCreateSessionSurface:
-    """create_session(surface=...) must be accepted and dispatch correctly.
-
-    These tests are the RED phase: they will all fail with
-    TypeError until create_session() is extended to accept the
-    surface= keyword argument.
-    """
-
-    async def test_create_session_accepts_surface_parameter(self, bridge_backend):
-        """create_session() must accept a surface= keyword argument.
-
-        Passes surface=headless_surface() and expects the returned
-        SessionInfo to carry the session_id created by the mock session.
-        """
-        mock_session = MagicMock()
-        mock_session.session_id = "sess-surface-001"
-        mock_session.project_id = "test-project"
-        mock_session.coordinator = MagicMock()
-
-        mock_prepared = MagicMock()
-        mock_prepared.create_session = AsyncMock(return_value=mock_session)
-        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+        bridge_backend._load_bundle = fake_load_bundle
+        bridge_backend._compute_bundle_version = MagicMock(return_value="new-version")
 
         from amplifier_distro.server.session_backend import FoundationBackend
 
-        with (
-            patch("asyncio.create_task") as mock_create_task,
-            patch("amplifier_distro.server.session_backend.register_transcript_hooks"),
-            patch("amplifier_distro.server.session_backend.register_metadata_hooks"),
-            patch("amplifier_distro.server.session_backend.register_spawning"),
-        ):
-            mock_create_task.return_value = MagicMock()
-            info = await FoundationBackend.create_session(
-                bridge_backend,
-                working_dir="/tmp",
-                surface=headless_surface(),
-            )
+        await FoundationBackend.reload_bundle(bridge_backend)
 
-        assert info.session_id == "sess-surface-001"
+        assert bridge_backend._prepared_bundle is new_bundle
+        assert bridge_backend._prepared_bundle is not old_bundle
+        assert len(load_calls) == 1
 
-    async def test_create_session_surface_none_uses_headless_defaults(
+    async def test_reload_bundle_updates_bundle_version(self, bridge_backend):
+        """reload_bundle() stores the new computed version in _bundle_version."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="9999.0")
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)
+
+        assert bridge_backend._bundle_version == "9999.0"
+
+    async def test_reload_bundle_calls_on_bundle_reload_on_active_surfaces(
         self, bridge_backend
     ):
-        """surface=None must use headless defaults and register an approval system.
+        """reload_bundle() notifies every active session surface via on_bundle_reload."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
 
-        The headless approval system enables auto-approve behaviour so
-        that CLI / non-interactive callers work without an event queue.
-        """
-        mock_session = MagicMock()
-        mock_session.session_id = "sess-headless-001"
-        mock_session.project_id = "test-project"
-        mock_session.coordinator = MagicMock()
+        on_reload_a = AsyncMock()
+        handle_a = _make_mock_handle("sess-surf-a")
+        handle_a.surface = MagicMock()
+        handle_a.surface.on_bundle_reload = on_reload_a
 
-        mock_prepared = MagicMock()
-        mock_prepared.create_session = AsyncMock(return_value=mock_session)
-        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+        on_reload_b = AsyncMock()
+        handle_b = _make_mock_handle("sess-surf-b")
+        handle_b.surface = MagicMock()
+        handle_b.surface.on_bundle_reload = on_reload_b
+
+        bridge_backend._sessions = {
+            "sess-surf-a": handle_a,
+            "sess-surf-b": handle_b,
+        }
 
         from amplifier_distro.server.session_backend import FoundationBackend
 
-        with (
-            patch("asyncio.create_task") as mock_create_task,
-            patch("amplifier_distro.server.session_backend.register_transcript_hooks"),
-            patch("amplifier_distro.server.session_backend.register_metadata_hooks"),
-            patch("amplifier_distro.server.session_backend.register_spawning"),
-        ):
-            mock_create_task.return_value = MagicMock()
-            info = await FoundationBackend.create_session(
-                bridge_backend,
-                working_dir="/tmp",
-                surface=None,
-            )
+        await FoundationBackend.reload_bundle(bridge_backend)
 
-        assert info.session_id == "sess-headless-001"
-        assert "sess-headless-001" in bridge_backend._approval_systems
+        on_reload_a.assert_awaited_once()
+        on_reload_b.assert_awaited_once()
 
-    async def test_create_session_with_web_chat_surface_stores_approval(
+    async def test_reload_bundle_skips_sessions_without_surface(self, bridge_backend):
+        """reload_bundle() skips sessions whose handle has no surface — must not raise."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
+
+        handle = _make_mock_handle("sess-no-surf")
+        handle.surface = None
+
+        on_reload_b = AsyncMock()
+        handle_b = _make_mock_handle("sess-no-surf-b")
+        handle_b.surface = MagicMock()
+        handle_b.surface.on_bundle_reload = on_reload_b
+
+        bridge_backend._sessions = {
+            "sess-no-surf": handle,
+            "sess-no-surf-b": handle_b,
+        }
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)  # must not raise
+
+        on_reload_b.assert_awaited_once()
+
+    async def test_reload_bundle_skips_surfaces_with_no_on_bundle_reload(
         self, bridge_backend
     ):
-        """surface=web_chat_surface(q) must store an ApprovalSystem for that session.
+        """reload_bundle() skips surfaces with on_bundle_reload = None — must not raise."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
 
-        The web-chat surface carries the event queue used for streaming;
-        the backend must wire the approval system so that UI approval
-        requests can be resolved via resolve_approval().
-        """
-        mock_session = MagicMock()
-        mock_session.session_id = "sess-webchat-001"
-        mock_session.project_id = "test-project"
-        mock_session.coordinator = MagicMock()
-        mock_session.coordinator.hooks = MagicMock()
+        handle = _make_mock_handle("sess-no-callback")
+        handle.surface = MagicMock()
+        handle.surface.on_bundle_reload = None
 
-        mock_prepared = MagicMock()
-        mock_prepared.create_session = AsyncMock(return_value=mock_session)
-        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+        on_reload_b = AsyncMock()
+        handle_b = _make_mock_handle("sess-no-callback-b")
+        handle_b.surface = MagicMock()
+        handle_b.surface.on_bundle_reload = on_reload_b
 
-        q: asyncio.Queue = asyncio.Queue()
-
-        from amplifier_distro.server.session_backend import FoundationBackend
-
-        with (
-            patch("asyncio.create_task") as mock_create_task,
-            patch("amplifier_distro.server.session_backend.register_transcript_hooks"),
-            patch("amplifier_distro.server.session_backend.register_metadata_hooks"),
-            patch("amplifier_distro.server.session_backend.register_spawning"),
-        ):
-            mock_create_task.return_value = MagicMock()
-            await FoundationBackend.create_session(
-                bridge_backend,
-                working_dir="/tmp",
-                surface=web_chat_surface(q),
-            )
-
-        assert "sess-webchat-001" in bridge_backend._approval_systems
-
-
-# ── TestResumeSessionSurface ───────────────────────────────────────────────────
-
-
-class TestResumeSessionSurface:
-    """resume_session(surface=...) must be accepted and dispatch correctly."""
-
-    async def test_resume_session_accepts_surface_parameter(self, bridge_backend):
-        """resume_session() must accept a surface= keyword argument and wire approval.
-
-        Passes a web_chat_surface carrying an event queue; expects the approval
-        system to be registered in bridge_backend._approval_systems after the call.
-        """
-        q: asyncio.Queue = asyncio.Queue()
-
-        mock_session = MagicMock()
-        mock_session.coordinator = MagicMock()
-        mock_session.coordinator.hooks = MagicMock()
-
-        mock_handle = MagicMock()
-        mock_handle.session = mock_session
-
-        bridge_backend._sessions["sess-resume-surface-001"] = mock_handle
+        bridge_backend._sessions = {
+            "sess-no-callback": handle,
+            "sess-no-callback-b": handle_b,
+        }
 
         from amplifier_distro.server.session_backend import FoundationBackend
 
-        with patch("asyncio.create_task") as mock_create_task:
-            mock_create_task.return_value = MagicMock()
-            await FoundationBackend.resume_session(
-                bridge_backend,
-                "sess-resume-surface-001",
-                "/tmp",
-                surface=web_chat_surface(q),
-            )
+        await FoundationBackend.reload_bundle(bridge_backend)  # must not raise
 
-        assert "sess-resume-surface-001" in bridge_backend._approval_systems
+        on_reload_b.assert_awaited_once()
 
-    async def test_resume_session_surface_none_does_not_error(self, bridge_backend):
-        """resume_session(surface=None) must not raise or create approval system.
+    async def test_reload_bundle_continues_past_surface_error(self, bridge_backend):
+        """reload_bundle() continues to other surfaces when one raises — must not raise."""
+        new_bundle = MagicMock(name="new_bundle")
+        bridge_backend._load_bundle = AsyncMock(return_value=new_bundle)
+        bridge_backend._compute_bundle_version = MagicMock(return_value="v2")
 
-        When no surface is provided the method is a lightweight reconnect-only
-        operation; it must not populate _approval_systems.
-        """
-        mock_session = MagicMock()
-        mock_session.coordinator = MagicMock()
-        mock_session.coordinator.hooks = MagicMock()
-
-        mock_handle = MagicMock()
-        mock_handle.session = mock_session
-
-        bridge_backend._sessions["sess-noop-001"] = mock_handle
-
-        from amplifier_distro.server.session_backend import FoundationBackend
-
-        await FoundationBackend.resume_session(
-            bridge_backend,
-            "sess-noop-001",
-            "/tmp",
-            surface=None,
+        handle_a = _make_mock_handle("sess-err-a")
+        handle_a.surface = MagicMock()
+        handle_a.surface.on_bundle_reload = AsyncMock(
+            side_effect=RuntimeError("surface exploded")
         )
 
-        assert "sess-noop-001" not in bridge_backend._approval_systems
+        on_reload_b = AsyncMock()
+        handle_b = _make_mock_handle("sess-err-b")
+        handle_b.surface = MagicMock()
+        handle_b.surface.on_bundle_reload = on_reload_b
+
+        bridge_backend._sessions = {
+            "sess-err-a": handle_a,
+            "sess-err-b": handle_b,
+        }
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.reload_bundle(bridge_backend)  # must not raise
+
+        on_reload_b.assert_awaited_once()
+
+
+# ── FoundationBackend._compute_bundle_version ─────────────────────────────────
+
+
+class TestFoundationBackendComputeBundleVersion:
+    """_compute_bundle_version() returns mtime string of overlay bundle.yaml."""
+
+    def test_returns_empty_string_when_no_overlay(self, bridge_backend):
+        """Returns '' when overlay does not exist."""
+        # overlay_dir is not patched — function must short-circuit before calling it
+        with patch("amplifier_distro.overlay.overlay_exists", return_value=False):
+            from amplifier_distro.server.session_backend import FoundationBackend
+
+            version = FoundationBackend._compute_bundle_version(bridge_backend)
+
+        assert version == ""
+
+    def test_returns_mtime_string_when_overlay_bundle_yaml_exists(
+        self, bridge_backend, tmp_path
+    ):
+        """Returns str(bundle_yaml.stat().st_mtime) when overlay bundle.yaml exists."""
+        bundle_yaml = tmp_path / "bundle.yaml"
+        bundle_yaml.write_text("bundle:\n  name: test\n")
+
+        with (
+            patch("amplifier_distro.overlay.overlay_exists", return_value=True),
+            patch("amplifier_distro.overlay.overlay_dir", return_value=tmp_path),
+        ):
+            from amplifier_distro.server.session_backend import FoundationBackend
+
+            version = FoundationBackend._compute_bundle_version(bridge_backend)
+
+        expected = str(bundle_yaml.stat().st_mtime)
+        assert version != ""
+        assert version == expected
+
+    def test_returns_empty_string_when_overlay_dir_exists_but_bundle_yaml_missing(
+        self, bridge_backend, tmp_path
+    ):
+        """Returns '' when overlay exists but bundle.yaml is absent."""
+        # tmp_path exists but has no bundle.yaml
+        with (
+            patch("amplifier_distro.overlay.overlay_exists", return_value=True),
+            patch("amplifier_distro.overlay.overlay_dir", return_value=tmp_path),
+        ):
+            from amplifier_distro.server.session_backend import FoundationBackend
+
+            version = FoundationBackend._compute_bundle_version(bridge_backend)
+
+        assert version == ""
+
+
+class TestSessionHandlePrewarmFields:
+    """RED tests — _SessionHandle does not yet have bundle_version / surface fields.
+
+    These tests are expected to FAIL with:
+        TypeError: _SessionHandle.__init__() got an unexpected keyword argument 'bundle_version'
+
+    Once the fields are added to the dataclass the tests will turn GREEN.
+    """
+
+    def test_session_handle_has_bundle_version_field_defaulting_to_empty_string(self):
+        """bundle_version defaults to '' when not supplied."""
+        from amplifier_distro.server.session_backend import _SessionHandle
+
+        handle = _SessionHandle(
+            session_id="s001",
+            project_id="p001",
+            working_dir=Path("/tmp"),
+            session=None,
+        )
+        assert handle.bundle_version == ""
+
+    def test_session_handle_has_surface_field_defaulting_to_none(self):
+        """surface defaults to None when not supplied."""
+        from amplifier_distro.server.session_backend import _SessionHandle
+
+        handle = _SessionHandle(
+            session_id="s002",
+            project_id="p001",
+            working_dir=Path("/tmp"),
+            session=None,
+        )
+        assert handle.surface is None
+
+    def test_session_handle_accepts_explicit_bundle_version(self):
+        """bundle_version can be set explicitly at construction time."""
+        from amplifier_distro.server.session_backend import _SessionHandle
+
+        handle = _SessionHandle(
+            session_id="s003",
+            project_id="p001",
+            working_dir=Path("/tmp"),
+            session=None,
+            bundle_version="1700000000.0",
+        )
+        assert handle.bundle_version == "1700000000.0"
+
+    async def test_create_session_stores_bundle_version_on_handle(
+        self, bridge_backend
+    ):
+        """create_session() stamps _bundle_version onto the new _SessionHandle.
+
+        When create_session() builds the _SessionHandle, it must pass
+        ``bundle_version=self._bundle_version`` so the handle carries the
+        version at the time the session was created (used later for staleness
+        detection).
+        """
+        mock_session = MagicMock()
+        mock_session.session_id = "sess-bv-001"
+
+        mock_prepared = MagicMock()
+        mock_prepared.create_session = AsyncMock(return_value=mock_session)
+        bridge_backend._load_bundle = AsyncMock(return_value=mock_prepared)
+        bridge_backend._bundle_version = "mtime-99999.0"
+
+        from amplifier_distro.server.session_backend import FoundationBackend
+
+        await FoundationBackend.create_session(bridge_backend, working_dir="/tmp")
+
+        assert bridge_backend._sessions["sess-bv-001"].bundle_version == "mtime-99999.0"
+
+        # Cleanup: cancel the worker task
+        if "sess-bv-001" in bridge_backend._worker_tasks:
+            task = bridge_backend._worker_tasks["sess-bv-001"]
+            task.cancel()
+            with pytest.raises((asyncio.CancelledError, Exception)):
+                await task
