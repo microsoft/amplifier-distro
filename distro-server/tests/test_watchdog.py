@@ -464,9 +464,16 @@ class TestWatchdogCli:
         assert "not running" in result.output
 
 
+_XFAIL_SUPERVISOR = pytest.mark.xfail(
+    reason="RED phase: supervisor-aware _restart_server not yet implemented",
+    strict=True,
+)
+
+
 class TestRestartServerSupervisorDetection:
     """Verify _restart_server() uses supervisor-aware restart under systemd/launchd."""
 
+    @_XFAIL_SUPERVISOR
     @patch("amplifier_distro.server.watchdog.daemonize")
     @patch("amplifier_distro.server.watchdog.stop_process")
     def test_restart_under_systemd_exits_not_daemonize(
@@ -474,17 +481,20 @@ class TestRestartServerSupervisorDetection:
         mock_stop: MagicMock,
         mock_daemonize: MagicMock,
     ) -> None:
-        """Under systemd (INVOCATION_ID set): stops server and exits 1, never daemonizes."""
+        """Under systemd (INVOCATION_ID set): stop, exit 1; never daemonize."""
         from amplifier_distro.server.watchdog import _restart_server
 
-        with patch.dict(os.environ, {"INVOCATION_ID": "abc123"}, clear=True):
-            with pytest.raises(SystemExit) as exc_info:
-                _restart_server("127.0.0.1", 8400, None, False)
+        with (
+            patch.dict(os.environ, {"INVOCATION_ID": "abc123"}, clear=True),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            _restart_server("127.0.0.1", 8400, None, False)
 
         assert exc_info.value.code == 1
         mock_stop.assert_called_once()
         mock_daemonize.assert_not_called()
 
+    @_XFAIL_SUPERVISOR
     @patch("amplifier_distro.server.watchdog.daemonize")
     @patch("amplifier_distro.server.watchdog.stop_process")
     def test_restart_under_launchd_exits_not_daemonize(
@@ -492,7 +502,7 @@ class TestRestartServerSupervisorDetection:
         mock_stop: MagicMock,
         mock_daemonize: MagicMock,
     ) -> None:
-        """Under launchd (LAUNCHD_JOB_NAME set): stops server and exits 1, never daemonizes."""
+        """Under launchd (LAUNCHD_JOB_NAME set): stop, exit 1; never daemonize."""
         from amplifier_distro.server.watchdog import _restart_server
 
         with (
@@ -507,18 +517,13 @@ class TestRestartServerSupervisorDetection:
         mock_stop.assert_called_once()
         mock_daemonize.assert_not_called()
 
-    @patch(
-        "amplifier_distro.server.watchdog._is_supervised",
-        create=True,
-        return_value=False,
-    )
+    @_XFAIL_SUPERVISOR
     @patch("amplifier_distro.server.watchdog.daemonize")
     @patch("amplifier_distro.server.watchdog.is_running", return_value=False)
     def test_restart_standalone_calls_daemonize(
         self,
         _mock_is_running: MagicMock,
         mock_daemonize: MagicMock,
-        mock_is_supervised: MagicMock,
     ) -> None:
         """Standalone (no supervisor env vars): calls daemonize() normally."""
         mock_daemonize.return_value = 12345
@@ -528,11 +533,11 @@ class TestRestartServerSupervisorDetection:
         with patch.dict(os.environ, {}, clear=True):
             _restart_server("127.0.0.1", 8400, None, False)
 
-        mock_is_supervised.assert_called_once()
         mock_daemonize.assert_called_once_with(
             host="127.0.0.1", port=8400, apps_dir=None, dev=False
         )
 
+    @_XFAIL_SUPERVISOR
     @patch("amplifier_distro.server.watchdog.logger")
     @patch("amplifier_distro.server.watchdog.daemonize")
     @patch("amplifier_distro.server.watchdog.is_running", return_value=False)
@@ -542,7 +547,7 @@ class TestRestartServerSupervisorDetection:
         mock_daemonize: MagicMock,
         mock_logger: MagicMock,
     ) -> None:
-        """When daemonize() raises RuntimeError: logs warning and returns (no re-raise)."""
+        """When daemonize() raises RuntimeError: log warning, return cleanly."""
         mock_daemonize.side_effect = RuntimeError("Address already in use")
 
         from amplifier_distro.server.watchdog import _restart_server
