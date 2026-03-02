@@ -226,7 +226,12 @@ def _generate_systemd_server_unit(distro_bin: str) -> str:
         [Service]
         Type=simple
         ExecStart={distro_bin} serve --host 127.0.0.1 --port {port}
-        Restart=on-failure
+        Restart=always
+        # Note: Restart=always (not on-failure) is intentional. The watchdog triggers
+        # restarts by exiting with code 1, which causes systemd to restart the watchdog
+        # unit. On clean exits (e.g. SIGTERM from the watchdog supervisor path), systemd
+        # must also restart. systemctl stop still works — systemd sets an inhibit-restart
+        # flag on admin stops that overrides this policy.
         RestartSec=5
         StartLimitIntervalSec=60
         StartLimitBurst=5

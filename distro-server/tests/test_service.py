@@ -80,9 +80,15 @@ class TestSystemdServerUnit:
         assert "Service" in parser
         assert "Install" in parser
 
-    def test_restart_on_failure(self) -> None:
+    def test_restart_always(self) -> None:
+        """Server unit must use Restart=always so watchdog-triggered restarts work.
+
+        Restart=on-failure doesn't trigger on exit 0 (uvicorn graceful SIGTERM).
+        systemctl stop still works — systemd sets an inhibit-restart flag on
+        admin stops that overrides this policy.
+        """
         parser = self._parse(self._generate())
-        assert parser["Service"]["Restart"] == "on-failure"
+        assert parser["Service"]["Restart"] == "always"
 
     def test_after_network(self) -> None:
         parser = self._parse(self._generate())
