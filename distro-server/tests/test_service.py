@@ -173,7 +173,7 @@ class TestLaunchdServerPlist:
 
     def test_valid_xml(self) -> None:
         """Generated plist must parse as valid XML."""
-        ET.fromstring(self._generate())
+        ET.fromstring(self._generate())  # noqa: S314
 
     def test_correct_label(self) -> None:
         content = self._generate()
@@ -213,7 +213,7 @@ class TestLaunchdWatchdogPlist:
         return _generate_launchd_watchdog_plist(distro_bin)
 
     def test_valid_xml(self) -> None:
-        ET.fromstring(self._generate())
+        ET.fromstring(self._generate())  # noqa: S314
 
     def test_watchdog_label(self) -> None:
         content = self._generate()
@@ -524,6 +524,40 @@ class TestFindDistroBinary:
             result = _find_distro_binary()
 
         assert result is None
+
+    def test_rejects_wrong_binary_name(self, tmp_path: Path) -> None:
+        """argv[0] with wrong name (pytest, python, uv) must be rejected."""
+        from amplifier_distro.service import _find_distro_binary
+
+        wrong_binary = tmp_path / "pytest"
+        wrong_binary.touch()
+        wrong_binary.chmod(0o755)
+
+        with (
+            patch.object(sys, "argv", [str(wrong_binary)]),
+            patch.object(shutil, "which", return_value="/usr/local/bin/amp-distro"),
+        ):
+            result = _find_distro_binary()
+
+        # Must fall back to shutil.which, not return the pytest path
+        assert result == "/usr/local/bin/amp-distro"
+
+    def test_rejects_deprecated_amp_distro_server(self, tmp_path: Path) -> None:
+        """amp-distro-server on disk must not end up as the resolved binary."""
+        from amplifier_distro.service import _find_distro_binary
+
+        deprecated = tmp_path / "amp-distro-server"
+        deprecated.touch()
+        deprecated.chmod(0o755)
+
+        with (
+            patch.object(sys, "argv", [str(deprecated)]),
+            patch.object(shutil, "which", return_value="/usr/local/bin/amp-distro"),
+        ):
+            result = _find_distro_binary()
+
+        assert result == "/usr/local/bin/amp-distro"
+        assert "amp-distro-server" not in (result or "")
 
 
 # ---------------------------------------------------------------------------
