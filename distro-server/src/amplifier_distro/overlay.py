@@ -90,11 +90,7 @@ def get_includes(data: dict[str, Any] | None = None) -> list[str]:
 
 
 def ensure_overlay(provider: Provider) -> Path:
-<<<<<<< HEAD
     """Create or update the overlay with the distro bundle + a provider.
-=======
-    """Create (or update) the overlay bundle with the distro bundle + a provider.
->>>>>>> 2a8acc42444e4bb95b41598b047af5369a23cc26
 
     If the overlay already exists, the provider include is added only if
     not already present.  The distro bundle include is always ensured.
