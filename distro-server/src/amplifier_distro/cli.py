@@ -282,8 +282,14 @@ def service_cmd_status() -> None:
     type=int,
     help="Bind port",
 )
-def watchdog_cmd(host: str, port: int) -> None:
+@click.option(
+    "--supervised",
+    is_flag=True,
+    hidden=True,
+    help="Running under service manager — exit to trigger restart.",
+)
+def watchdog_cmd(host: str, port: int, supervised: bool) -> None:
     """Run the health watchdog (for service supervision — not user-facing)."""
     from .server.watchdog import run_watchdog_loop
 
-    run_watchdog_loop(host=host, port=port)
+    run_watchdog_loop(host=host, port=port, supervised=supervised)

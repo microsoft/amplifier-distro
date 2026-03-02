@@ -594,6 +594,7 @@ def _generate_launchd_watchdog_plist(distro_bin: str) -> str:
             <array>
                 <string>{distro_bin}</string>
                 <string>watchdog</string>
+                <string>--supervised</string>
                 <string>--host</string>
                 <string>127.0.0.1</string>
                 <string>--port</string>

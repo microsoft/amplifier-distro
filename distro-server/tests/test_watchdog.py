@@ -9,7 +9,6 @@ Tests cover:
 """
 
 import contextlib
-import os
 import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -461,86 +460,76 @@ class TestWatchdogCli:
         assert "not running" in result.output
 
 
+_WD = "amplifier_distro.server.watchdog"
+_PID_PATCH = patch(_WD + ".pid_file_path", return_value=Path("/tmp/test.pid"))
+
+
 class TestRestartServerSupervisorDetection:
-    """Verify _restart_server() uses supervisor-aware restart under systemd/launchd."""
+    """Verify _restart_server() supervisor detection via supervised flag and INVOCATION_ID."""  # noqa: E501
 
-    @patch("amplifier_distro.server.watchdog.daemonize")
-    @patch("amplifier_distro.server.watchdog.stop_process")
-    def test_restart_under_systemd_exits_not_daemonize(
-        self,
-        mock_stop: MagicMock,
-        mock_daemonize: MagicMock,
+    @patch(_WD + ".daemonize")
+    @_PID_PATCH
+    def test_supervised_flag_exits_without_daemonize(
+        self, mock_pid: MagicMock, mock_daemonize: MagicMock
     ) -> None:
-        """Under systemd (INVOCATION_ID set): stop, exit 1; never daemonize."""
         from amplifier_distro.server.watchdog import _restart_server
 
-        with (
-            patch.dict(os.environ, {"INVOCATION_ID": "abc123"}, clear=True),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            _restart_server("127.0.0.1", 8400, None, False)
-
+        with pytest.raises(SystemExit) as exc_info:
+            _restart_server("127.0.0.1", 8400, None, False, supervised=True)
         assert exc_info.value.code == 1
-        mock_stop.assert_called_once()
         mock_daemonize.assert_not_called()
 
-    @patch("amplifier_distro.server.watchdog.daemonize")
-    @patch("amplifier_distro.server.watchdog.stop_process")
-    def test_restart_under_launchd_exits_not_daemonize(
+    @patch(_WD + ".daemonize")
+    @_PID_PATCH
+    def test_invocation_id_exits_without_daemonize(
         self,
-        mock_stop: MagicMock,
+        mock_pid: MagicMock,
         mock_daemonize: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Under launchd (LAUNCHD_JOB_NAME set): stop, exit 1; never daemonize."""
         from amplifier_distro.server.watchdog import _restart_server
 
-        with (
-            patch.dict(
-                os.environ, {"LAUNCHD_JOB_NAME": "com.amplifier.distro"}, clear=True
-            ),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            _restart_server("127.0.0.1", 8400, None, False)
-
+        monkeypatch.setenv("INVOCATION_ID", "test-id")
+        with pytest.raises(SystemExit) as exc_info:
+            _restart_server("127.0.0.1", 8400, None, False, supervised=False)
         assert exc_info.value.code == 1
-        mock_stop.assert_called_once()
         mock_daemonize.assert_not_called()
 
-    @patch("amplifier_distro.server.watchdog.daemonize")
-    @patch("amplifier_distro.server.watchdog.is_running", return_value=False)
-    def test_restart_standalone_calls_daemonize(
+    @patch(_WD + ".daemonize", return_value=12345)
+    @patch(_WD + ".is_running", return_value=False)
+    @_PID_PATCH
+    def test_standalone_calls_daemonize(
         self,
-        _mock_is_running: MagicMock,
+        mock_pid: MagicMock,
+        mock_running: MagicMock,
         mock_daemonize: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Standalone (no supervisor env vars): calls daemonize() normally."""
-        mock_daemonize.return_value = 12345
+        from amplifier_distro.server.watchdog import _restart_server
+
+        monkeypatch.delenv("INVOCATION_ID", raising=False)
+        _restart_server("127.0.0.1", 8400, None, False, supervised=False)
+        mock_daemonize.assert_called_once()
+
+    @patch(_WD + ".daemonize", side_effect=RuntimeError("Port in use"))
+    @patch(_WD + ".is_running", return_value=False)
+    @_PID_PATCH
+    def test_port_busy_logs_warning_and_returns(
+        self,
+        mock_pid: MagicMock,
+        mock_running: MagicMock,
+        mock_daemonize: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        import logging
 
         from amplifier_distro.server.watchdog import _restart_server
 
-        with patch.dict(os.environ, {}, clear=True):
-            _restart_server("127.0.0.1", 8400, None, False)
-
-        mock_daemonize.assert_called_once_with(
-            host="127.0.0.1", port=8400, apps_dir=None, dev=False
+        monkeypatch.delenv("INVOCATION_ID", raising=False)
+        with caplog.at_level(logging.WARNING, logger=_WD):
+            _restart_server("127.0.0.1", 8400, None, False, supervised=False)
+        assert any(
+            "busy" in r.message.lower() or "retry" in r.message.lower()
+            for r in caplog.records
         )
-
-    @patch("amplifier_distro.server.watchdog.logger")
-    @patch("amplifier_distro.server.watchdog.daemonize")
-    @patch("amplifier_distro.server.watchdog.is_running", return_value=False)
-    def test_restart_port_busy_logs_warning_and_returns(
-        self,
-        _mock_is_running: MagicMock,
-        mock_daemonize: MagicMock,
-        mock_logger: MagicMock,
-    ) -> None:
-        """When daemonize() raises RuntimeError: log warning, return cleanly."""
-        mock_daemonize.side_effect = RuntimeError("Address already in use")
-
-        from amplifier_distro.server.watchdog import _restart_server
-
-        with patch.dict(os.environ, {}, clear=True):
-            # Must NOT raise — the function should catch RuntimeError and return
-            _restart_server("127.0.0.1", 8400, None, False)
-
-        mock_logger.warning.assert_called_once()

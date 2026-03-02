@@ -49,4 +49,4 @@ class TestWatchdogCommand:
             )
 
         assert result.exit_code == 0
-        mock_loop.assert_called_once_with(host="0.0.0.0", port=9999)
+        mock_loop.assert_called_once_with(host="0.0.0.0", port=9999, supervised=False)

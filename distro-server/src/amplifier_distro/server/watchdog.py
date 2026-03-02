@@ -127,6 +127,7 @@ def run_watchdog_loop(
     max_restarts: int = 5,
     apps_dir: str | None = None,
     dev: bool = False,
+    supervised: bool = False,
 ) -> None:
     """Run the watchdog loop in the foreground (blocking).
 
@@ -216,7 +217,7 @@ def run_watchdog_loop(
                 restart_count + 1,
                 str(max_restarts) if max_restarts > 0 else "unlimited",
             )
-            _restart_server(host, port, apps_dir, dev)
+            _restart_server(host, port, apps_dir, dev, supervised)
             restart_count += 1
             first_failure_time = None  # Reset after restart attempt
     finally:
@@ -229,14 +230,16 @@ def _restart_server(
     port: int,
     apps_dir: str | None,
     dev: bool,
+    supervised: bool = False,
 ) -> None:
     """Stop the server (if running) and start a fresh instance.
 
-    **Supervisor-managed path (systemd/launchd):** If INVOCATION_ID
-    (systemd) or LAUNCHD_JOB_NAME (launchd) is set in the environment,
-    we stop the server and exit with code 1. The supervisor sees the
-    non-zero exit and restarts both amp-distro serve and this watchdog
-    cleanly, avoiding double-restart races and orphan processes.
+    **Supervisor-managed path (systemd/launchd):** If ``supervised`` is
+    True (passed via ``--supervised`` CLI flag by the launchd plist) or
+    INVOCATION_ID (systemd) is set in the environment, exit with code 1.
+    The supervisor sees the non-zero exit and restarts both amp-distro
+    serve and this watchdog cleanly, avoiding double-restart races and
+    orphan processes.
 
     **Standalone path:** Stop the server, pause for port release, then
     spawn a fresh instance via daemonize(). If the port is still busy,
@@ -248,21 +251,21 @@ def _restart_server(
         port: Server bind port.
         apps_dir: Optional apps directory.
         dev: Dev mode flag.
+        supervised: True when launched by a service manager (launchd).
+            Also triggers exit when INVOCATION_ID (systemd) is detected.
     """
-    server_pid = pid_file_path()
-
-    # If running under a service manager, stop the server and exit with error.
-    # The supervisor (systemd Restart=on-failure / launchd KeepAlive) will
-    # restart amp-distro serve cleanly -- no risk of double-restart.
-    if os.environ.get("INVOCATION_ID") or os.environ.get("LAUNCHD_JOB_NAME"):
+    # If running under a service manager, exit with error so the supervisor
+    # (systemd Restart=always / launchd KeepAlive) restarts cleanly.
+    # supervised flag: set via --supervised CLI arg in the launchd plist.
+    # INVOCATION_ID: set by systemd for all managed units.
+    if supervised or os.environ.get("INVOCATION_ID"):
         logger.info(
-            "Running under service manager — stopping server and exiting "
-            "to trigger supervised restart"
+            "Running under service manager — exiting to trigger supervised restart"
         )
-        stop_process(server_pid)
         sys.exit(1)
 
     # Standalone path: stop the server and restart directly.
+    server_pid = pid_file_path()
     if is_running(server_pid):
         logger.info("Stopping existing server...")
         stop_process(server_pid)

@@ -240,6 +240,18 @@ class TestLaunchdWatchdogPlist:
         content = self._generate("/my/custom/amp-distro")
         assert "/my/custom/amp-distro" in content
 
+    def test_watchdog_plist_contains_supervised_flag(self) -> None:
+        """Launchd watchdog plist must pass --supervised for macOS supervisor detection."""
+        content = self._generate()
+        assert "<string>--supervised</string>" in content
+
+    def test_server_plist_does_not_contain_supervised_flag(self) -> None:
+        """Server plist must NOT have --supervised — only watchdog is supervised."""
+        from amplifier_distro.service import _generate_launchd_server_plist
+
+        content = _generate_launchd_server_plist("/usr/local/bin/amp-distro")
+        assert "--supervised" not in content
+
 
 # ---------------------------------------------------------------------------
 # Install/uninstall dispatch
