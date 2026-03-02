@@ -31,11 +31,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # URIs that should be silently removed (no replacement).
 _STALE_URIS: list[str] = [
-    # Session-naming hook was removed from the ecosystem.
-    (
-        "git+https://github.com/microsoft/amplifier-foundation@main"
-        "#subdirectory=modules/hooks-session-naming"
-    ),
+    # hooks-session-naming is now properly declared in the distro bundle at
+    # https://github.com/microsoft/amplifier-bundle-distro/blob/main/behaviors/start.yaml
+    # No longer needs migration stripping.
 ]
 
 # URIs that moved — old URI → current URI.  The overlay migration
