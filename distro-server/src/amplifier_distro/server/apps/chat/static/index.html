@@ -1107,6 +1107,44 @@
     @media (hover: none), (pointer: coarse) {
       .session-card-actions { opacity: 1; }
     }
+
+    /* Hide three-dot menu during editing to prevent overlap */
+    .session-name-editing .session-card-actions {
+      display: none;
+    }
+
+    /* Move edit actions to top-right corner (swap with three-dot menu) */
+    .session-name-editing .session-edit-actions {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      z-index: 1;
+    }
+
+    /* Style edit buttons to match three-dot menu visual weight */
+    .session-name-editing .session-edit-actions button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      border-radius: 5px;
+      background: var(--action-btn-bg);
+      color: var(--action-btn-color);
+      font-size: 12px;
+      border: none;
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s;
+    }
+
+    .session-name-editing .session-edit-actions button:hover {
+      background: var(--action-btn-bg-hover);
+      color: var(--action-btn-color-hover);
+    }
     .session-card-action-btn {
       position: relative;
       display: inline-flex;
