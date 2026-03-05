@@ -14,7 +14,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import re as _re
 import time
+from pathlib import Path
 from typing import Any
 
 from .client import SlackClient
@@ -25,6 +27,9 @@ from .models import SlackMessage
 from .sessions import SlackSessionManager
 
 logger = logging.getLogger(__name__)
+
+# Max file size for Slack file downloads (50 MB)
+_MAX_FILE_SIZE = 50 * 1024 * 1024
 
 
 class SlackEventHandler:
@@ -47,6 +52,8 @@ class SlackEventHandler:
         self._commands = command_handler
         self._config = config
         self._bot_user_id: str | None = None
+        # Track bot response ts -> (session_id, prompt, channel, thread) for regeneration
+        self._message_prompts: dict[str, tuple[str, str, str, str | None]] = {}
 
     async def get_bot_user_id(self) -> str:
         """Get and cache the bot's user ID."""
@@ -126,6 +133,8 @@ class SlackEventHandler:
             await self._handle_message(event)
         elif event_type == "app_mention":
             await self._handle_app_mention(event)
+        elif event_type == "reaction_added":
+            await self._handle_reaction(event)
         else:
             logger.debug(f"Ignoring event type: {event_type}")
 
@@ -151,6 +160,10 @@ class SlackEventHandler:
         channel_id = event.get("channel", "")
         thread_ts = event.get("thread_ts")
         message_ts = event.get("ts", "")
+
+        # DM detection: Slack sends channel_type="im" for direct messages
+        channel_type = event.get("channel_type", "")
+        is_dm = channel_type == "im"
 
         if not text or not channel_id:
             return
@@ -178,7 +191,12 @@ class SlackEventHandler:
         # Check if there's a session mapping for this context
         mapping = self._sessions.get_mapping(channel_id, thread_ts)
         if mapping and mapping.is_active:
-            await self._handle_session_message(message)
+            await self._handle_session_message(message, event=event)
+            return
+
+        # DMs without a session mapping: treat as a command (e.g., "new", "help")
+        if is_dm:
+            await self._handle_command_message(message, bot_user_id)
             return
 
         # No active session mapping for this context
@@ -402,23 +420,255 @@ class SlackEventHandler:
                     parts.append(text)
         return "\n".join(parts)
 
-    async def _handle_session_message(self, message: SlackMessage) -> None:
+    # --- Prompt enrichment ---
+
+    async def _build_prompt(
+        self,
+        message: SlackMessage,
+        file_descriptions: list[str] | None = None,
+    ) -> str:
+        """Build an enriched prompt with context metadata."""
+        parts: list[str] = []
+
+        channel_info = await self._client.get_channel_info(message.channel_id)
+        if channel_info:
+            channel_label = f"#{channel_info.name}"
+        else:
+            channel_label = message.channel_id
+        parts.append(f"[From <@{message.user_id}> in {channel_label}]")
+
+        if file_descriptions:
+            parts.append("[User uploaded files:")
+            parts.extend(f"  {desc}" for desc in file_descriptions)
+            parts.append("]")
+
+        parts.append(message.text)
+        return "\n".join(parts)
+
+    # --- File download ---
+
+    async def _download_files(
+        self,
+        event: dict[str, Any],
+        working_dir: str,
+        channel_id: str = "",
+        thread_ts: str = "",
+    ) -> list[str]:
+        """Download files attached to a Slack message.
+
+        Returns description strings. Posts errors to Slack thread.
+        """
+        files = event.get("files", [])
+        if not files:
+            return []
+
+        descriptions: list[str] = []
+        errors: list[str] = []
+        wd = Path(working_dir).expanduser()
+        wd.mkdir(parents=True, exist_ok=True)
+
+        for file_info in files:
+            url = file_info.get("url_private")
+            name = file_info.get("name", "file")
+            size = file_info.get("size", 0)
+
+            if not url:
+                errors.append(f"{name}: no download URL available")
+                continue
+            if size > _MAX_FILE_SIZE:
+                errors.append(f"{name}: file too large ({size:,} bytes, max 50MB)")
+                continue
+
+            safe_name = _re.sub(r"[^\w\\-.]", "_", name)
+            dest = wd / safe_name
+            counter = 1
+            while dest.exists():
+                stem, suffix = Path(safe_name).stem, Path(safe_name).suffix
+                dest = wd / f"{stem}_{counter}{suffix}"
+                counter += 1
+
+            try:
+                import aiohttp  # pyright: ignore[reportMissingImports]
+
+                async with aiohttp.ClientSession() as session:
+                    headers = {"Authorization": f"Bearer {self._config.bot_token}"}
+                    async with session.get(url, headers=headers) as resp:
+                        if resp.status == 200:
+                            data = await resp.read()
+                            ct = resp.headers.get("Content-Type", "")
+                            if "text/html" in ct or (
+                                len(data) < 10000
+                                and data[:15].lower().startswith(b"<!doctype html")
+                            ):
+                                errors.append(
+                                    f"{name}: got HTML instead of file content "
+                                    "(Slack app needs `files:read` scope)"
+                                )
+                                continue
+                            dest.write_bytes(data)
+                            descriptions.append(f"{name} ({size} bytes) -> ./{dest.name}")
+                            logger.info("Downloaded %s -> %s", name, dest)
+                        elif resp.status == 403:
+                            errors.append(f"{name}: access denied (needs `files:read` scope)")
+                        else:
+                            errors.append(f"{name}: download failed (HTTP {resp.status})")
+            except ImportError:
+                errors.append("File downloads require aiohttp: uv pip install amplifier-distro[slack]")
+                break
+            except Exception:
+                errors.append(f"{name}: download failed (unexpected error)")
+                logger.exception("Error downloading file %s", name)
+
+        if errors and channel_id:
+            error_text = ":warning: *File download issues:*\n" + "\n".join(
+                f"\u2022 {e}" for e in errors
+            )
+            try:
+                await self._client.post_message(
+                    channel_id, text=error_text, thread_ts=thread_ts or None
+                )
+            except Exception:
+                logger.debug("Failed to post file error to Slack", exc_info=True)
+
+        return descriptions
+
+    # --- Reaction commands (regenerate + cancel) ---
+
+    async def _handle_reaction(self, event: dict[str, Any]) -> None:
+        """Handle reaction_added events for regenerate and cancel."""
+        reaction = event.get("reaction", "")
+        user = event.get("user", "")
+        item = event.get("item", {})
+        channel = item.get("channel", "")
+        message_ts = item.get("ts", "")
+
+        if not channel or not message_ts:
+            return
+
+        # Don't process our own reactions
+        bot_user_id = await self.get_bot_user_id()
+        if user == bot_user_id:
+            return
+
+        # Regenerate: re-execute original prompt
+        if reaction in ("repeat", "arrows_counterclockwise"):
+            prompt_info = self._message_prompts.get(message_ts)
+            if prompt_info is None:
+                logger.debug("No tracked prompt for message %s", message_ts)
+                return
+
+            session_id, original_prompt, original_channel, original_thread = prompt_info
+            logger.info("Regenerate requested for session %s", session_id)
+
+            await self._safe_react(channel, message_ts, "hourglass_flowing_sand")
+
+            try:
+                response = await self._sessions._backend.send_message(
+                    session_id, original_prompt
+                )
+            except Exception:
+                logger.exception("Regenerate failed for session %s", session_id)
+                response = "Error: Failed to regenerate response."
+
+            if response:
+                reply_thread = original_thread or message_ts
+                chunks = SlackFormatter.format_response(response)
+                for chunk in chunks:
+                    posted_ts = await self._client.post_message(
+                        original_channel, text=chunk, thread_ts=reply_thread
+                    )
+                # Track the new response for future regeneration
+                if posted_ts:
+                    self._track_prompt(
+                        posted_ts, session_id, original_prompt,
+                        original_channel, original_thread,
+                    )
+
+            await self._safe_react(channel, message_ts, "white_check_mark")
+            return
+
+        # Cancel: stop running execution
+        if reaction == "x":
+            # Find which session this message belongs to
+            prompt_info = self._message_prompts.get(message_ts)
+            if prompt_info:
+                session_id = prompt_info[0]
+            else:
+                # Try to find via mapping
+                mapping = self._sessions.get_mapping(channel)
+                if mapping:
+                    session_id = mapping.session_id
+                else:
+                    return
+
+            logger.info("Cancel requested for session %s", session_id)
+            try:
+                await self._sessions._backend.cancel_session(session_id, level="graceful")
+                await self._safe_react(channel, message_ts, "white_check_mark")
+            except Exception:
+                logger.exception("Cancel failed for session %s", session_id)
+            return
+
+    def _track_prompt(
+        self,
+        message_ts: str,
+        session_id: str,
+        prompt: str,
+        channel_id: str,
+        thread_ts: str | None,
+    ) -> None:
+        """Track a bot response message_ts -> prompt for regeneration."""
+        self._message_prompts[message_ts] = (session_id, prompt, channel_id, thread_ts)
+        # Bound the map to prevent unbounded growth
+        if len(self._message_prompts) > 500:
+            # Remove oldest entries (first 100)
+            keys = list(self._message_prompts.keys())[:100]
+            for k in keys:
+                self._message_prompts.pop(k, None)
+
+    # --- Session message handler ---
+
+    async def _handle_session_message(
+        self,
+        message: SlackMessage,
+        event: dict[str, Any] | None = None,
+    ) -> None:
         """Route a message to its mapped Amplifier session."""
-        # Add thinking indicator (best-effort)
         await self._safe_react(message.channel_id, message.ts, "hourglass_flowing_sand")
 
+        mapping = self._sessions.get_mapping(message.channel_id, message.thread_ts)
+
+        # Download attached files if present
+        file_descriptions: list[str] | None = None
+        if event and event.get("files") and mapping and mapping.working_dir:
+            file_descriptions = await self._download_files(
+                event, mapping.working_dir,
+                channel_id=message.channel_id,
+                thread_ts=message.thread_ts or message.ts,
+            )
+
+        # Build enriched prompt
+        enriched_text = await self._build_prompt(message, file_descriptions)
+
         # Route through session manager
-        response = await self._sessions.route_message(message)
+        response = await self._sessions.route_message(
+            message, text_override=enriched_text
+        )
 
         if response:
             reply_thread = message.thread_ts or message.ts
             chunks = SlackFormatter.format_response(response)
+            posted_ts: str | None = None
             for chunk in chunks:
-                await self._client.post_message(
-                    message.channel_id,
-                    text=chunk,
-                    thread_ts=reply_thread,
+                posted_ts = await self._client.post_message(
+                    message.channel_id, text=chunk, thread_ts=reply_thread,
                 )
 
-        # Done reaction (best-effort)
+            # Track for regeneration
+            if posted_ts and mapping:
+                self._track_prompt(
+                    posted_ts, mapping.session_id, enriched_text,
+                    message.channel_id, message.thread_ts,
+                )
+
         await self._safe_react(message.channel_id, message.ts, "white_check_mark")

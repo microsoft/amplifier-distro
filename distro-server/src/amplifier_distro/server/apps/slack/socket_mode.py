@@ -37,6 +37,10 @@ _BACKOFF_FACTOR = 2.0
 # Slack sends pings every ~30s, so 5 minutes of silence = definitely dead.
 _RECEIVE_TIMEOUT = 300  # seconds
 
+# Watchdog: detect stale connections and OS suspend/resume
+_WATCHDOG_INTERVAL = 15.0  # seconds between checks
+_HEALTH_CHECK_CYCLES = 8  # check auth.test every N watchdog cycles (~2 min)
+
 # Dedup window: ignore duplicate events for the same message within this window.
 # Must be longer than the slowest session creation (~30s) plus Slack retry
 # delays, otherwise the key expires and duplicates slip through.
@@ -72,6 +76,10 @@ class SocketModeAdapter:
         # both app_mention and message events for the same @mention.
         # Maps "channel:ts" -> monotonic time when first seen.
         self._seen_events: dict[str, float] = {}
+        # Watchdog state
+        self._watchdog_task: asyncio.Task[None] | None = None
+        self._last_wall: float = 0.0
+        self._last_mono: float = 0.0
         # Pending background event tasks — tracked so we can drain on stop()
         # and log exceptions via done callbacks.
         self._pending_tasks: set[asyncio.Task] = set()
@@ -89,6 +97,7 @@ class SocketModeAdapter:
 
         self._running = True
         self._task = asyncio.create_task(self._connection_loop())
+        self._watchdog_task = asyncio.create_task(self._watchdog_loop())
         logger.info("Socket Mode adapter started")
 
     async def _resolve_bot_id(self) -> str | None:
@@ -302,7 +311,7 @@ class SocketModeAdapter:
                 )
                 return
 
-        # Forward to our event handler
+        # Forward to our event handler (messages, mentions, reactions)
         handler_payload = {
             "type": "event_callback",
             "event": event,
@@ -413,6 +422,64 @@ class SocketModeAdapter:
                 logger.debug("Error closing HTTP session", exc_info=True)
         self._session = None
 
+    async def _watchdog_loop(self) -> None:
+        """Detect stale connections via wall-clock vs monotonic divergence.
+
+        Runs every 15s. If wall-clock time jumped forward significantly
+        more than monotonic time (OS suspend/resume), forces a reconnect.
+        Also performs periodic auth.test health checks.
+        """
+        self._last_wall = time.time()
+        self._last_mono = time.monotonic()
+        health_counter = 0
+
+        while self._running:
+            await asyncio.sleep(_WATCHDOG_INTERVAL)
+            if not self._running:
+                break
+
+            now_wall = time.time()
+            now_mono = time.monotonic()
+            wall_elapsed = now_wall - self._last_wall
+            mono_elapsed = now_mono - self._last_mono
+            self._last_wall = now_wall
+            self._last_mono = now_mono
+
+            # Detect suspend/resume: wall clock jumped but monotonic didn't
+            if wall_elapsed > mono_elapsed + _WATCHDOG_INTERVAL * 2:
+                logger.warning(
+                    "[watchdog] Wall-clock jump detected (%.0fs wall vs %.0fs mono), "
+                    "forcing reconnect",
+                    wall_elapsed,
+                    mono_elapsed,
+                )
+                if self._ws and not self._ws.closed:
+                    await self._ws.close()
+                continue
+
+            # Periodic health check
+            health_counter += 1
+            if health_counter >= _HEALTH_CHECK_CYCLES:
+                health_counter = 0
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        resp = await client.post(
+                            "https://slack.com/api/auth.test",
+                            headers={"Authorization": f"Bearer {self._config.bot_token}"},
+                        )
+                        data = resp.json()
+                        if not data.get("ok"):
+                            logger.warning(
+                                "[watchdog] Health check failed: %s, forcing reconnect",
+                                data.get("error"),
+                            )
+                            if self._ws and not self._ws.closed:
+                                await self._ws.close()
+                except Exception:
+                    logger.warning("[watchdog] Health check error, forcing reconnect", exc_info=True)
+                    if self._ws and not self._ws.closed:
+                        await self._ws.close()
+
     async def stop(self) -> None:
         """Stop the Socket Mode connection.
 
@@ -420,6 +487,12 @@ class SocketModeAdapter:
         main connection loop, so in-flight LLM calls complete cleanly.
         """
         self._running = False
+
+        # Stop watchdog
+        if self._watchdog_task and not self._watchdog_task.done():
+            self._watchdog_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._watchdog_task
 
         await self._close_ws()
 
