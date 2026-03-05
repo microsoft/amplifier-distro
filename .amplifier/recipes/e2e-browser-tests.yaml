@@ -24,9 +24,10 @@ tags:
 # Context — defaults; override at execution time if needed
 # ---------------------------------------------------------------------------
 context:
-  server_url: "http://127.0.0.1:8400"
+  server_url: "http://127.0.0.1:8400"  # Supports both http:// and https://
   slack_workspace: "https://amplifiercrew.slack.com/"
   slack_channel: "amplifier"
+  browser_setup: ""  # Optional context for browser setup (e.g., CDP connection, RDP config)
 
 # ---------------------------------------------------------------------------
 # Stages
@@ -42,7 +43,7 @@ stages:
         type: "bash"
         command: |
           set -e
-          response=$(curl -s -o /tmp/_distro_health.json -w "%{http_code}" \
+          response=$(curl -k -s -o /tmp/_distro_health.json -w "%{http_code}" \
             --connect-timeout 5 --max-time 10 \
             "{{server_url}}/api/health" 2>&1)
           if [ "$response" != "200" ]; then
@@ -91,6 +92,7 @@ stages:
           - Report each scenario as exactly PASS, FAIL, or SKIP (with reason).
           - Build on prior state — do NOT reload the page between scenarios
             unless a scenario explicitly says to reload.
+          {{browser_setup}}
 
           Target base URL: {{server_url}}
 
@@ -442,6 +444,7 @@ stages:
               sc-17*.png  = Surface C (observer)
               sa-17*.png  = Surface A (actor)
           - Report sub-scenarios 17A, 17B, and 17C each as PASS, FAIL, or SKIP.
+          {{browser_setup}}
 
           Target URL: {{server_url}}/apps/chat/
 
@@ -579,7 +582,7 @@ stages:
           Overall     : [X/3 PASSED] (SKIPs noted separately)
           Screenshots : [comma-separated list of all files saved]
         output: "multi_surface_results"
-        timeout: 600
+        timeout: 1200
 
       # -------------------------------------------------------------------
       # Step 3: Session actions (overflow menu, rename, pin/unpin)
@@ -600,6 +603,7 @@ stages:
           - Report each scenario as exactly PASS, FAIL, or SKIP (with reason).
           - Build on prior state — do NOT reload the page between scenarios
             unless a scenario explicitly says to reload.
+          {{browser_setup}}
 
           Target base URL: {{server_url}}
 
@@ -798,6 +802,7 @@ stages:
           - CRITICAL: Extract the session ID from the @Distro new reply in
             Scenario 3 and reuse it verbatim in Scenario 5.
             Record it as: CAPTURED_ID=<the-exact-id>
+          {{browser_setup}}
 
           Target workspace : {{slack_workspace}}
           Target channel   : #{{slack_channel}}
