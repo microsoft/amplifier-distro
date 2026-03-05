@@ -25,7 +25,7 @@ tags:
 # Context — defaults; override at execution time if needed
 # ---------------------------------------------------------------------------
 context:
-  server_url: "http://127.0.0.1:8400"  # Supports both http:// and https://
+  server_url: "http://127.0.0.1:28400"  # Supports both http:// and https://
   slack_workspace: "https://amplifiercrew.slack.com/"
   slack_channel: "amplifier"
   browser_setup: ""  # Optional context for browser setup (e.g., CDP connection, RDP config)
