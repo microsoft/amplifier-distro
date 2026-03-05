@@ -1,17 +1,18 @@
 name: "e2e-browser-tests"
 description: >
-  End-to-end browser tests for amplifier-distro. Stage 1 checks server health,
-  Stage 2 runs 16 chat browser scenarios covering page load, messaging/streaming,
-  session management, slash commands, CWD/preferences, and UI features (/apps/chat/)
-  PLUS a cross-surface real-time awareness scenario (S17) using two simultaneous
-  browser sessions PLUS 8 session-actions scenarios (S18-S25) covering overflow
-  menu guards, rename, and pin/unpin. An approval gate pauses for Slack login
-  confirmation. Stage 3 runs 8 Slack-bridge scenarios. Stage 4 validates and
-  produces a final PASS/FAIL summary table.
-version: "1.5.0"
+  End-to-end browser tests for amplifier-distro. Stage 1 starts the server
+  (or validates an existing one). Stage 2 runs 25 chat browser scenarios:
+  S01-S05 (page load, messaging, cancel, shift-enter), S06-S11 (metadata,
+  history, filter, sort, new session, CWD), S12-S16 (slash commands, theme),
+  S18-S25 (session actions: overflow menu, rename, pin/unpin), and S17A-C
+  (cross-surface real-time awareness using two simultaneous browser sessions).
+  An approval gate pauses for Slack login confirmation. Stage 3 runs 8
+  Slack-bridge scenarios. Stage 4 validates and produces a final PASS/FAIL
+  summary table. Stage 5 cleans up server and screenshots. 33 total scenarios.
+version: "2.0.0"
 author: "amplifier-distro team"
 created: "2026-02-20T14:32:00Z"
-updated: "2026-03-05T08:00:00Z"
+updated: "2026-03-05T10:00:00Z"
 tags:
   - e2e
   - browser-testing
@@ -27,9 +28,11 @@ context:
   server_url: "http://127.0.0.1:8400"  # Supports both http:// and https://
   slack_workspace: "https://amplifiercrew.slack.com/"
   slack_channel: "amplifier"
-  browser_setup: ""  # Optional: CDP connection instructions (e.g., "agent-browser connect 9222 && agent-browser tab new")
+  browser_setup: ""  # Optional context for browser setup (e.g., CDP connection, RDP config)
+  auto_start_server: "false"  # "true" = recipe starts amp-distro serve on the server_url port; "false" = expects server already running
   browser_mode: "headless"  # "headless" (default, CI-friendly) or "headed" (watch tests run)
   target_repo: "microsoft/amplifier-distro"  # GitHub repo for filing issues
+  screenshot_dir: "/tmp/e2e-screenshots"  # Directory for test screenshots (cleaned up after run)
 
 # ---------------------------------------------------------------------------
 # Stages
@@ -37,29 +40,49 @@ context:
 stages:
 
   # =========================================================================
-  # STAGE 1: server-check
+  # STAGE 1: server-setup
   # =========================================================================
-  - name: "server-check"
+  - name: "server-setup"
     steps:
-      - id: "health-check"
+      - id: "start-server"
         type: "bash"
         command: |
           set -e
-          response=$(curl -k -s -o /tmp/_distro_health.json -w "%{http_code}" \
-            --connect-timeout 5 --max-time 10 \
-            "{{server_url}}/api/health" 2>&1)
-          if [ "$response" != "200" ]; then
-            echo "==========================================================" >&2
-            echo "ERROR: amp-distro-server is not healthy (HTTP $response)"   >&2
-            echo "Start the server with: amp-distro-server start --port 8400" >&2
-            echo "==========================================================" >&2
+          mkdir -p {{screenshot_dir}}
+
+          # Extract port from server_url
+          PORT=$(echo "{{server_url}}" | sed -E 's|.*:([0-9]+).*|\1|')
+
+          if [ "{{auto_start_server}}" = "true" ]; then
+            echo "Starting amp-distro on port ${PORT}..."
+            amp-distro serve --port ${PORT} --no-auth > /tmp/_distro_e2e.log 2>&1 &
+            PID=$!
+            for i in $(seq 1 30); do
+              if curl -sk -o /dev/null -w "%{http_code}" "http://127.0.0.1:${PORT}/api/health" 2>/dev/null | grep -q 200; then
+                echo "server_pid=${PID}"
+                echo "Server started (PID ${PID}) on port ${PORT}"
+                exit 0
+              fi
+              sleep 1
+            done
+            echo "ERROR: Server failed to start within 30s" >&2
+            kill ${PID} 2>/dev/null
             exit 1
+          else
+            response=$(curl -sk -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "{{server_url}}/api/health" 2>&1)
+            if [ "$response" != "200" ]; then
+              echo "==========================================================" >&2
+              echo "ERROR: Server not healthy at {{server_url}} (HTTP ${response})" >&2
+              echo "Start with: amp-distro serve --port ${PORT} --no-auth" >&2
+              echo "Or run with auto_start_server=true to start automatically" >&2
+              echo "==========================================================" >&2
+              exit 1
+            fi
+            echo "server_pid=0"
+            echo "Server healthy at {{server_url}}"
           fi
-          cat /tmp/_distro_health.json
-          echo ""
-          echo "Server healthy at {{server_url}}"
-        output: "server_health"
-        timeout: 30
+        output: "server_info"
+        timeout: 60
         on_error: "fail"
 
       - id: "capture-context"
@@ -80,24 +103,24 @@ stages:
   # STAGE 2: chat-tests
   # 25 scenarios covering all core features of /apps/chat/.
   #
-  # Scenario groups:
-  #   S01-S02  Page load & initial state
-  #   S03-S05  Messaging & streaming
-  #   S06      Session metadata
-  #   S07-S09  Session history panel
-  #   S10-S11  New session & CWD
-  #   S12-S15  Slash commands
-  #   S16      Theme toggle
-  #   S17      Cross-surface real-time awareness
-  #   S18-S25  Session actions (overflow menu, rename, pin/unpin)
+  # Scenario groups (5 steps):
+  #   chat-e2e-core      S01-S05  Page load, messaging, cancel, shift-enter
+  #   chat-e2e-sessions  S06-S11  Metadata, history, filter, sort, CWD
+  #   chat-e2e-commands  S12-S16  Slash commands, theme
+  #   chat-session-actions-e2e  S18-S25  Overflow menu, rename, pin/unpin
+  #   chat-multi-surface-e2e    S17A-C   Cross-surface real-time awareness
   # =========================================================================
   - name: "chat-tests"
     steps:
-      - id: "chat-e2e"
+      # -------------------------------------------------------------------
+      # Step 1: Core scenarios (S01-S05) — page load, messaging, cancel
+      # -------------------------------------------------------------------
+      - id: "chat-e2e-core"
         agent: "browser-tester:browser-operator"
         prompt: |
           You are running automated E2E browser tests for the amplifier-distro
-          chat surface at /apps/chat/. Follow every rule below exactly.
+          chat surface at /apps/chat/. This step covers scenarios S01-S05
+          (page load, messaging, cancel, shift-enter).
 
           MANDATORY RULES
           ---------------
@@ -106,23 +129,20 @@ stages:
             (default), omit --headed for faster CI-friendly execution.
           - Use --session chat-e2e on EVERY agent-browser command.
           - Take a screenshot at every meaningful step. Name them descriptively.
+          - Save all screenshots to {{screenshot_dir}}/
           - Report each scenario as exactly PASS, FAIL, or SKIP (with reason).
           - Build on prior state — do NOT reload the page between scenarios
             unless a scenario explicitly says to reload.
+          {{browser_setup}}
 
           RESILIENCE & FAILURE BEHAVIOR
-          ------------------------------
-          - If an expected UI element is missing or renamed, search the full
-            accessibility tree (snapshot -ic) for alternatives — the UI may
-            have changed while the functionality remains. Try 2-3 approaches
-            before giving up on a scenario.
-          - If you truly cannot proceed (server error, auth wall, page crash),
-            mark the scenario as BLOCKED with evidence and continue to the next.
-          - Do NOT attempt to diagnose root causes or fix application bugs.
-            When a verification fails, document what you expected vs what you
-            observed, take a screenshot, and move on to the next scenario.
-
-          {{browser_setup}}
+          -----------------------------
+          - If a scenario fails, record it as FAIL and continue to the next scenario.
+            Do NOT stop the entire test run for a single failure.
+          - If an element is not found, wait up to 10s with retries before reporting FAIL.
+          - Use ONLY the target URL provided ({{server_url}}). Do NOT scan for
+            alternative ports, do NOT start or restart the server, do NOT modify
+            the application. If the server is unreachable, report BLOCKED.
 
           Target base URL: {{server_url}}
 
@@ -201,10 +221,12 @@ stages:
           Screenshots:
             ch-04a-stop-clicked.png      (immediately after clicking Stop)
             ch-04b-cancelled.png         (after cancel completes)
-          PASS → system cancel message appears AND Send restored AND input enabled
-          FAIL → bot finishes before Stop could be clicked — report as SKIP with
-                 reason "response completed before Stop could be clicked" and include
-                 the approximate response time observed
+          PASS → Stop clicked AND system cancel message appears AND Send restored AND input enabled
+          SKIP → bot finished before Stop could be clicked (timing-dependent, not a bug —
+                 include the approximate response time observed)
+          FAIL → Stop was clicked AND acknowledged (response truncated, Send restored,
+                 input re-enabled) BUT no cancellation system message appeared in the chat
+                 (this indicates a UI feedback gap, not a cancellation failure)
 
           ================================================================
           SCENARIO 5 — Shift+Enter Inserts Newline (Does Not Send)
@@ -223,6 +245,59 @@ stages:
                       (to avoid accidentally sending this test text).
           PASS → two lines visible in textarea, no new bubble in chat
           FAIL → message was sent OR textarea only has one line
+
+          ================================================================
+          FINAL REPORT — output this exact block after all 5 scenarios
+          ================================================================
+
+          CHAT E2E CORE TEST RESULTS (S01-S05)
+          =====================================
+          Scenario 01 (Page Load & Title)          : [PASS/FAIL] — [evidence]
+          Scenario 02 (Initial State)              : [PASS/FAIL] — [evidence]
+          Scenario 03 (Send & Streaming)           : [PASS/FAIL] — [evidence]
+          Scenario 04 (Stop/Cancel)                : [PASS/FAIL/SKIP] — [evidence]
+          Scenario 05 (Shift+Enter Newline)        : [PASS/FAIL] — [evidence]
+
+          Overall     : [X/5 PASSED] (SKIPs noted separately)
+          Screenshots : [comma-separated list of all files saved]
+        output: "chat_results_core"
+        timeout: 900
+
+      # -------------------------------------------------------------------
+      # Step 2: Session scenarios (S06-S11) — metadata, history, filter, CWD
+      # -------------------------------------------------------------------
+      - id: "chat-e2e-sessions"
+        agent: "browser-tester:browser-operator"
+        prompt: |
+          You are continuing automated E2E browser tests for the amplifier-distro
+          chat surface at /apps/chat/. This step covers scenarios S06-S11
+          (metadata, history, filter, sort, new session, CWD).
+
+          Continue from prior state. Do NOT reload unless a scenario says to.
+
+          MANDATORY RULES
+          ---------------
+          - Browser display: {{browser_mode}}. If "headed", add --headed to
+            every agent-browser command so the user can watch. If "headless"
+            (default), omit --headed for faster CI-friendly execution.
+          - Use --session chat-e2e on EVERY agent-browser command.
+          - Take a screenshot at every meaningful step. Name them descriptively.
+          - Save all screenshots to {{screenshot_dir}}/
+          - Report each scenario as exactly PASS, FAIL, or SKIP (with reason).
+          - Build on prior state — do NOT reload the page between scenarios
+            unless a scenario explicitly says to reload.
+          {{browser_setup}}
+
+          RESILIENCE & FAILURE BEHAVIOR
+          -----------------------------
+          - If a scenario fails, record it as FAIL and continue to the next scenario.
+            Do NOT stop the entire test run for a single failure.
+          - If an element is not found, wait up to 10s with retries before reporting FAIL.
+          - Use ONLY the target URL provided ({{server_url}}). Do NOT scan for
+            alternative ports, do NOT start or restart the server, do NOT modify
+            the application. If the server is unreachable, report BLOCKED.
+
+          Target base URL: {{server_url}}
 
           ================================================================
           SCENARIO 6 — Session Metadata in Sessions Panel
@@ -315,12 +390,12 @@ stages:
                  session context created
 
           ================================================================
-          SCENARIO 11 — CWD Input Persists via Preferences
+          SCENARIO 11 — CWD Input Persists via Server-Side Save
           ================================================================
-          This scenario tests that the default CWD preference is saved and
-          reloaded correctly across page navigations.
+          This scenario tests that the CWD preference is saved server-side
+          when a message is sent, and persists across page reloads.
 
-          Step 1 — Set the preference:
+          Step 1 — Set the CWD preference:
             Find the "New Session CWD" textbox at the bottom of the sessions
             panel. Use the fill command (NOT type) to set the value to /tmp:
               agent-browser fill @<ref> "/tmp" --session chat-e2e --headed
@@ -330,25 +405,86 @@ stages:
           Verify 11a: The textbox shows "/tmp" immediately after filling.
           Screenshot: ch-11a-cwd-set.png
 
-          Step 2 — Reload to confirm persistence:
-            Reload the page: navigate to {{server_url}}/apps/chat/
-            Wait up to 10 s for the page to load and WebSocket to connect.
-          Verify 11b: After reload, the "New Session CWD" input shows "/tmp"
-                      (the preference was saved and loaded from disk).
-          Screenshot: ch-11b-cwd-after-reload.png
-
-          Step 3 — New session inherits the saved CWD:
-            Click "+ New" to start a fresh draft session.
+          Step 2 — Start a new session and verify the bot uses /tmp:
+            Click "+ New" to start a fresh session.
             Send the message: what directory are you working in?
             Wait up to 30 seconds for the bot to respond.
-          Verify 11c: The bot's response mentions "/tmp" as its working directory.
-          Verify 11d: The session metadata block shows /tmp as the CWD.
-          Screenshots:
-            ch-11c-bot-confirms-dir.png  (bot response mentioning /tmp)
-            ch-11d-metadata.png          (session metadata showing /tmp)
-          PASS → fill sets /tmp AND /tmp persists after reload AND bot confirms /tmp
-          FAIL → input reverts after fill, /tmp lost after reload, or bot reports
-                 wrong directory (include actual values at each step)
+          Verify 11b: The bot's response mentions "/tmp" as its working directory.
+          Screenshot: ch-11b-bot-confirms-dir.png
+          Verify 11c: The session metadata block shows /tmp as the CWD.
+          Screenshot: ch-11c-metadata.png
+
+          Step 3 — Reload and verify server-side persistence:
+            Reload the page: navigate to {{server_url}}/apps/chat/
+            Wait up to 10 s for the page to load and WebSocket to connect.
+            Find the session from Step 2 in the sessions panel (look for the
+            session with "what directory are you working in?" in the preview
+            or the most recent session with messages).
+            Click on that session to load it.
+          Verify 11d: The session metadata still shows /tmp as the CWD after
+                      reload (this confirms server-side persistence, not just
+                      draft/localStorage persistence).
+          Screenshot: ch-11d-cwd-after-reload.png
+
+          PASS → fill sets /tmp AND bot confirms /tmp AND /tmp persists in
+                 session metadata after reload
+          FAIL → input reverts after fill, bot reports wrong directory, or
+                 /tmp lost from session metadata after reload (include actual
+                 values at each step)
+
+          ================================================================
+          FINAL REPORT — output this exact block after all 6 scenarios
+          ================================================================
+
+          CHAT E2E SESSIONS TEST RESULTS (S06-S11)
+          =========================================
+          Scenario 06 (Session Metadata)           : [PASS/FAIL] — [evidence]
+          Scenario 07 (Load History Session)       : [PASS/FAIL] — [evidence]
+          Scenario 08 (Filter Sessions)            : [PASS/FAIL] — [evidence]
+          Scenario 09 (Sort Mode Toggle)           : [PASS/FAIL] — [evidence]
+          Scenario 10 (+ New Session)              : [PASS/FAIL] — [evidence]
+          Scenario 11 (CWD Input & Persistence)    : [PASS/FAIL] — [evidence]
+
+          Overall     : [X/6 PASSED] (SKIPs noted separately)
+          Screenshots : [comma-separated list of all files saved]
+        output: "chat_results_sessions"
+        timeout: 900
+
+      # -------------------------------------------------------------------
+      # Step 3: Command scenarios (S12-S16) — slash commands, theme
+      # -------------------------------------------------------------------
+      - id: "chat-e2e-commands"
+        agent: "browser-tester:browser-operator"
+        prompt: |
+          You are continuing automated E2E browser tests for the amplifier-distro
+          chat surface at /apps/chat/. This step covers scenarios S12-S16
+          (slash commands, theme toggle).
+
+          Continue from prior state. Do NOT reload unless a scenario says to.
+
+          MANDATORY RULES
+          ---------------
+          - Browser display: {{browser_mode}}. If "headed", add --headed to
+            every agent-browser command so the user can watch. If "headless"
+            (default), omit --headed for faster CI-friendly execution.
+          - Use --session chat-e2e on EVERY agent-browser command.
+          - Take a screenshot at every meaningful step. Name them descriptively.
+          - Save all screenshots to {{screenshot_dir}}/
+          - Report each scenario as exactly PASS, FAIL, or SKIP (with reason).
+          - Build on prior state — do NOT reload the page between scenarios
+            unless a scenario explicitly says to reload.
+          {{browser_setup}}
+
+          RESILIENCE & FAILURE BEHAVIOR
+          -----------------------------
+          - If a scenario fails, record it as FAIL and continue to the next scenario.
+            Do NOT stop the entire test run for a single failure.
+          - If an element is not found, wait up to 10s with retries before reporting FAIL.
+          - Use ONLY the target URL provided ({{server_url}}). Do NOT scan for
+            alternative ports, do NOT start or restart the server, do NOT modify
+            the application. If the server is unreachable, report BLOCKED.
+
+          Target base URL: {{server_url}}
 
           ================================================================
           SCENARIO 12 — Slash Command Popup & Keyboard Navigation
@@ -429,33 +565,195 @@ stages:
           FAIL → colors don't change on toggle, or theme resets after reload
 
           ================================================================
-          FINAL REPORT — output this exact block after all 16 scenarios
+          FINAL REPORT — output this exact block after all 5 scenarios
           ================================================================
 
-          CHAT E2E TEST RESULTS
-          ======================
-          Scenario 01 (Page Load & Title)          : [PASS/FAIL] — [evidence]
-          Scenario 02 (Initial State)              : [PASS/FAIL] — [evidence]
-          Scenario 03 (Send & Streaming)           : [PASS/FAIL] — [evidence]
-          Scenario 04 (Stop/Cancel)                : [PASS/FAIL/SKIP] — [evidence]
-          Scenario 05 (Shift+Enter Newline)        : [PASS/FAIL] — [evidence]
-          Scenario 06 (Session Metadata)           : [PASS/FAIL] — [evidence]
-          Scenario 07 (Load History Session)       : [PASS/FAIL] — [evidence]
-          Scenario 08 (Filter Sessions)            : [PASS/FAIL] — [evidence]
-          Scenario 09 (Sort Mode Toggle)           : [PASS/FAIL] — [evidence]
-          Scenario 10 (+ New Session)              : [PASS/FAIL] — [evidence]
-          Scenario 11 (CWD Input & Persistence)   : [PASS/FAIL] — [evidence]
+          CHAT E2E COMMANDS TEST RESULTS (S12-S16)
+          =========================================
           Scenario 12 (Slash Popup & Nav)          : [PASS/FAIL] — [evidence]
           Scenario 13 (/help Command)              : [PASS/FAIL] — [evidence]
           Scenario 14 (/clear Command)             : [PASS/FAIL] — [evidence]
           Scenario 15 (/workspace Toggle)          : [PASS/FAIL] — [evidence]
           Scenario 16 (Theme Toggle & Persist)     : [PASS/FAIL] — [evidence]
 
-          Overall     : [X/16 PASSED] (SKIPs noted separately)
+          Overall     : [X/5 PASSED] (SKIPs noted separately)
           Screenshots : [comma-separated list of all files saved]
-        output: "chat_results"
-        timeout: 1800
+        output: "chat_results_commands"
+        timeout: 600
 
+      # -------------------------------------------------------------------
+      # Step 4: Session actions (S18-S25) — overflow menu, rename, pin/unpin
+      # Dedicated browser session to isolate from S01-S16 state.
+      # Runs BEFORE S17 so session actions always complete regardless of
+      # cross-surface timeout behaviour.
+      # -------------------------------------------------------------------
+      - id: "chat-session-actions-e2e"
+        agent: "browser-tester:browser-operator"
+        prompt: |
+          You are running automated E2E browser tests for session card actions
+          (overflow menu, rename, and pin/unpin) in the amplifier-distro chat
+          surface at /apps/chat/. Follow every rule below exactly.
+
+          MANDATORY RULES
+          ---------------
+          - Browser display: {{browser_mode}}. If "headed", add --headed to
+            every agent-browser command so the user can watch. If "headless"
+            (default), omit --headed for faster CI-friendly execution.
+          - Use --session chat-session-actions on EVERY agent-browser command.
+          - Take a screenshot at every meaningful step. Name them descriptively.
+          - Save all screenshots to {{screenshot_dir}}/
+          - Report each scenario as exactly PASS, FAIL, or SKIP (with reason).
+          - Build on prior state — do NOT reload the page between scenarios
+            unless a scenario explicitly says to reload.
+          {{browser_setup}}
+
+          RESILIENCE & FAILURE BEHAVIOR
+          -----------------------------
+          - If a scenario fails, record it as FAIL and continue to the next scenario.
+            Do NOT stop the entire test run for a single failure.
+          - If an element is not found, wait up to 10s with retries before reporting FAIL.
+          - Use ONLY the target URL provided ({{server_url}}). Do NOT scan for
+            alternative ports, do NOT start or restart the server, do NOT modify
+            the application. If the server is unreachable, report BLOCKED.
+
+          Target base URL: {{server_url}}
+
+          ================================================================
+          SETUP — Navigate and Establish State
+          ================================================================
+          Action    : Navigate to {{server_url}}/apps/chat/
+                      Wait up to 10 seconds for the page to fully render and
+                      WebSocket status dot to turn green (class "connected").
+          Screenshot: ch-18-setup.png
+
+          ================================================================
+          SCENARIO 18 — New Session Has No Overflow Menu
+          ================================================================
+          Action    : The page should have loaded with a new draft session
+                      (turn 0). Look at the session cards in the sessions panel.
+          Verify 18a: The active new session card does NOT have a
+                      "Session actions" button (the "…" overflow menu icon).
+                      The overflow menu is hidden for sessions with no
+                      completed turns.
+          Screenshot: ch-18-new-session-no-menu.png
+          PASS → new session card has no "…" overflow button visible
+          FAIL → overflow menu button is visible on a turn-0 session
+
+          ================================================================
+          SCENARIO 19 — After Sending Message, Overflow Menu Appears
+          ================================================================
+          Action    : In the message input, type and send:
+                        hello, say hi back in one word
+                      Wait up to 30 seconds for the bot to respond.
+          Verify 19a: The bot responded (at least 1 bot message visible).
+          Verify 19b: The session card now shows a "Session actions" button
+                      (the "…" overflow menu) — it appears only after the
+                      session has at least one completed turn.
+          Screenshot: ch-19-after-message-menu-visible.png
+          PASS → bot responded AND "…" overflow button now visible
+          FAIL → bot did not respond, or overflow button still hidden
+
+          ================================================================
+          SCENARIO 20 — Overflow Menu Contains Pin and Rename
+          ================================================================
+          Action    : Click the "Session actions" ("…") overflow button
+                      on the current session card to open the dropdown menu.
+          Verify 20a: The dropdown menu is visible.
+          Verify 20b: The menu contains a "Pin to top" option.
+          Verify 20c: The menu contains a "Rename" option.
+          Screenshot: ch-20-menu-has-pin-and-rename.png
+          Action 2  : Press Escape or click elsewhere to close the menu.
+          PASS → dropdown visible with both "Pin to top" and "Rename"
+          FAIL → menu missing, or either option not present
+
+          ================================================================
+          SCENARIO 21 — New Session Again Shows No Overflow Menu
+          ================================================================
+          Action    : Click the "+ New" button to create another new session.
+          Verify 21a: A new turn-0 session card appears.
+          Verify 21b: This new session card does NOT have the "…"
+                      overflow menu button.
+          Screenshot: ch-21-new-session-no-menu-again.png
+          PASS → fresh session card has no overflow button
+          FAIL → overflow menu visible on turn-0 session
+
+          ================================================================
+          SCENARIO 22 — Rename a Session via Overflow Menu
+          ================================================================
+          Action    : Switch back to the session from Scenario 19 (the one
+                      with "hello, say hi back" — it has messages and an
+                      overflow menu). Click its card to make it active.
+                      Then click the "…" overflow button and select "Rename".
+          Verify 22a: An inline text input appears on the session card.
+          Action 2  : Type "My Test Session" and press Enter to save.
+          Verify 22b: The session card now displays "My Test Session" as
+                      the session name.
+          Screenshot: ch-22-renamed-session.png
+          PASS → inline input appeared AND name saved as "My Test Session"
+          FAIL → no input appeared, or name did not save
+
+          ================================================================
+          SCENARIO 23 — Renamed Name Persists After Switching Sessions
+          ================================================================
+          Action    : Click "+ New" to create a new session (switching away
+                      from the renamed session).
+          Verify 23a: The new session is now active.
+          Verify 23b: In the sessions panel, the previously renamed session
+                      still shows "My Test Session" as its name.
+          Screenshot: ch-23-rename-persists.png
+          PASS → "My Test Session" still visible after switching sessions
+          FAIL → name reverted or is no longer visible
+
+          ================================================================
+          SCENARIO 24 — Pin a Session to Top
+          ================================================================
+          Action    : Find the "My Test Session" card in the sessions panel.
+                      Click its "…" overflow button and select "Pin to top".
+          Verify 24a: The session moves to the pinned section at the top
+                      of the sessions panel.
+          Verify 24b: A "Pinned" group header or badge is visible, and
+                      "My Test Session" appears under it.
+          Screenshot: ch-24-session-pinned.png
+          PASS → session appears in pinned section at top of panel
+          FAIL → session did not move, or pinned section not visible
+
+          ================================================================
+          SCENARIO 25 — Unpin a Session
+          ================================================================
+          Action    : Click the "…" overflow button on the pinned
+                      "My Test Session" card and select "Unpin".
+          Verify 25a: The session moves back to the regular (unpinned)
+                      section of the sessions panel.
+          Verify 25b: The session is no longer in the pinned group.
+          Screenshot: ch-25-session-unpinned.png
+          PASS → session returned to regular list, no longer pinned
+          FAIL → session still in pinned section after unpinning
+
+          ================================================================
+          FINAL REPORT — output this exact block after all 8 scenarios
+          ================================================================
+
+          SESSION ACTIONS E2E TEST RESULTS
+          =================================
+          Scenario 18 (New Session No Menu)        : [PASS/FAIL] — [evidence]
+          Scenario 19 (Menu After Message)         : [PASS/FAIL] — [evidence]
+          Scenario 20 (Menu Has Pin & Rename)      : [PASS/FAIL] — [evidence]
+          Scenario 21 (New Session No Menu Again)  : [PASS/FAIL] — [evidence]
+          Scenario 22 (Rename Session)             : [PASS/FAIL] — [evidence]
+          Scenario 23 (Rename Persists)            : [PASS/FAIL] — [evidence]
+          Scenario 24 (Pin Session)                : [PASS/FAIL] — [evidence]
+          Scenario 25 (Unpin Session)              : [PASS/FAIL] — [evidence]
+
+          Overall     : [X/8 PASSED]
+          Screenshots : [comma-separated list of all files saved]
+        output: "session_actions_results"
+        timeout: 600
+
+      # -------------------------------------------------------------------
+      # Step 5: Cross-surface real-time awareness (S17A-C)
+      # Uses two simultaneous browser sessions. Runs AFTER session actions
+      # so that S18-S25 always complete even if cross-surface tests time out.
+      # -------------------------------------------------------------------
       - id: "chat-multi-surface-e2e"
         agent: "browser-tester:browser-operator"
         prompt: |
@@ -465,31 +763,26 @@ stages:
 
           MANDATORY RULES
           ---------------
-          - Browser display: {{browser_mode}}. If "headed", add --headed to
-            every agent-browser command. If "headless" (default), omit --headed.
           - EVERY agent-browser command must explicitly specify its target session:
-              Surface C (observer) : --session surface-c
-              Surface A (actor)    : --session surface-a
+              Surface C (observer) : --headed --session surface-c
+              Surface A (actor)    : --headed --session surface-a
           - NEVER omit the --session flag. Commands without it will go to the wrong surface.
           - Take a screenshot after every meaningful action on EITHER surface.
+          - Save all screenshots to {{screenshot_dir}}/
           - Name screenshots with a surface prefix:
               sc-17*.png  = Surface C (observer)
               sa-17*.png  = Surface A (actor)
           - Report sub-scenarios 17A, 17B, and 17C each as PASS, FAIL, or SKIP.
+          {{browser_setup}}
 
           RESILIENCE & FAILURE BEHAVIOR
-          ------------------------------
-          - If an expected UI element is missing or renamed, search the full
-            accessibility tree (snapshot -ic) for alternatives â the UI may
-            have changed while the functionality remains. Try 2-3 approaches
-            before giving up on a scenario.
-          - If you truly cannot proceed (server error, auth wall, page crash),
-            mark the scenario as BLOCKED with evidence and continue to the next.
-          - Do NOT attempt to diagnose root causes or fix application bugs.
-            When a verification fails, document what you expected vs what you
-            observed, take a screenshot, and move on to the next scenario.
-
-          {{browser_setup}}
+          -----------------------------
+          - If a sub-scenario fails, record it as FAIL and continue to the next.
+            Do NOT stop the entire test run for a single failure.
+          - If an element is not found, wait up to 10s with retries before reporting FAIL.
+          - Use ONLY the target URL provided ({{server_url}}). Do NOT scan for
+            alternative ports, do NOT start or restart the server, do NOT modify
+            the application. If the server is unreachable, report BLOCKED.
 
           Target URL: {{server_url}}/apps/chat/
 
@@ -629,194 +922,33 @@ stages:
         output: "multi_surface_results"
         timeout: 1200
 
-      # -------------------------------------------------------------------
-      # Step 3: Session actions (overflow menu, rename, pin/unpin)
-      # S18-S25 — dedicated browser session to isolate from S01-S16 state
-      # -------------------------------------------------------------------
-      - id: "chat-session-actions-e2e"
-        agent: "browser-tester:browser-operator"
-        prompt: |
-          You are running automated E2E browser tests for session card actions
-          (overflow menu, rename, and pin/unpin) in the amplifier-distro chat
-          surface at /apps/chat/. Follow every rule below exactly.
-
-          MANDATORY RULES
-          ---------------
-          - Browser display: {{browser_mode}}. If "headed", add --headed to
-            every agent-browser command so the user can watch. If "headless"
-            (default), omit --headed for faster CI-friendly execution.
-          - Use --session chat-session-actions on EVERY agent-browser command.
-          - Take a screenshot at every meaningful step. Name them descriptively.
-          - Report each scenario as exactly PASS, FAIL, or SKIP (with reason).
-          - Build on prior state — do NOT reload the page between scenarios
-            unless a scenario explicitly says to reload.
-
-          RESILIENCE & FAILURE BEHAVIOR
-          ------------------------------
-          - If an expected UI element is missing or renamed, search the full
-            accessibility tree (snapshot -ic) for alternatives — the UI may
-            have changed while the functionality remains. Try 2-3 approaches
-            before giving up on a scenario.
-          - If you truly cannot proceed (server error, auth wall, page crash),
-            mark the scenario as BLOCKED with evidence and continue to the next.
-          - Do NOT attempt to diagnose root causes or fix application bugs.
-            When a verification fails, document what you expected vs what you
-            observed, take a screenshot, and move on to the next scenario.
-
-          {{browser_setup}}
-
-          Target base URL: {{server_url}}
-
-          ================================================================
-          SETUP — Navigate and Establish State
-          ================================================================
-          Action    : Navigate to {{server_url}}/apps/chat/
-                      Wait up to 10 seconds for the page to fully render and
-                      WebSocket status dot to turn green (class "connected").
-          Screenshot: ch-18-setup.png
-
-          ================================================================
-          SCENARIO 18 — New Session Has No Overflow Menu
-          ================================================================
-          Action    : The page should have loaded with a new draft session
-                      (turn 0). Look at the session cards in the sessions panel.
-          Verify 18a: The active new session card does NOT have a
-                      "Session actions" button (the "…" overflow menu icon).
-                      The overflow menu is hidden for sessions with no
-                      completed turns.
-          Screenshot: ch-18-new-session-no-menu.png
-          PASS → new session card has no "…" overflow button visible
-          FAIL → overflow menu button is visible on a turn-0 session
-
-          ================================================================
-          SCENARIO 19 — After Sending Message, Overflow Menu Appears
-          ================================================================
-          Action    : In the message input, type and send:
-                        hello, say hi back in one word
-                      Wait up to 30 seconds for the bot to respond.
-          Verify 19a: The bot responded (at least 1 bot message visible).
-          Verify 19b: The session card now shows a "Session actions" button
-                      (the "…" overflow menu) — it appears only after the
-                      session has at least one completed turn.
-          Screenshot: ch-19-after-message-menu-visible.png
-          PASS → bot responded AND "…" overflow button now visible
-          FAIL → bot did not respond, or overflow button still hidden
-
-          ================================================================
-          SCENARIO 20 — Overflow Menu Contains Pin and Rename
-          ================================================================
-          Action    : Click the "Session actions" ("…") overflow button
-                      on the current session card to open the dropdown menu.
-          Verify 20a: The dropdown menu is visible.
-          Verify 20b: The menu contains a "Pin to top" option.
-          Verify 20c: The menu contains a "Rename" option.
-          Screenshot: ch-20-menu-has-pin-and-rename.png
-          Action 2  : Press Escape or click elsewhere to close the menu.
-          PASS → dropdown visible with both "Pin to top" and "Rename"
-          FAIL → menu missing, or either option not present
-
-          ================================================================
-          SCENARIO 21 — New Session Again Shows No Overflow Menu
-          ================================================================
-          Action    : Click the "+ New" button to create another new session.
-          Verify 21a: A new turn-0 session card appears.
-          Verify 21b: This new session card does NOT have the "…"
-                      overflow menu button.
-          Screenshot: ch-21-new-session-no-menu-again.png
-          PASS → fresh session card has no overflow button
-          FAIL → overflow menu visible on turn-0 session
-
-          ================================================================
-          SCENARIO 22 — Rename a Session via Overflow Menu
-          ================================================================
-          Action    : Switch back to the session from Scenario 19 (the one
-                      with "hello, say hi back" — it has messages and an
-                      overflow menu). Click its card to make it active.
-                      Then click the "…" overflow button and select "Rename".
-          Verify 22a: An inline text input appears on the session card.
-          Action 2  : Type "My Test Session" and press Enter to save.
-          Verify 22b: The session card now displays "My Test Session" as
-                      the session name.
-          Screenshot: ch-22-renamed-session.png
-          PASS → inline input appeared AND name saved as "My Test Session"
-          FAIL → no input appeared, or name did not save
-
-          ================================================================
-          SCENARIO 23 — Renamed Name Persists After Switching Sessions
-          ================================================================
-          Action    : Click "+ New" to create a new session (switching away
-                      from the renamed session).
-          Verify 23a: The new session is now active.
-          Verify 23b: In the sessions panel, the previously renamed session
-                      still shows "My Test Session" as its name.
-          Screenshot: ch-23-rename-persists.png
-          PASS → "My Test Session" still visible after switching sessions
-          FAIL → name reverted or is no longer visible
-
-          ================================================================
-          SCENARIO 24 — Pin a Session to Top
-          ================================================================
-          Action    : Find the "My Test Session" card in the sessions panel.
-                      Click its "…" overflow button and select "Pin to top".
-          Verify 24a: The session moves to the pinned section at the top
-                      of the sessions panel.
-          Verify 24b: A "Pinned" group header or badge is visible, and
-                      "My Test Session" appears under it.
-          Screenshot: ch-24-session-pinned.png
-          PASS → session appears in pinned section at top of panel
-          FAIL → session did not move, or pinned section not visible
-
-          ================================================================
-          SCENARIO 25 — Unpin a Session
-          ================================================================
-          Action    : Click the "…" overflow button on the pinned
-                      "My Test Session" card and select "Unpin".
-          Verify 25a: The session moves back to the regular (unpinned)
-                      section of the sessions panel.
-          Verify 25b: The session is no longer in the pinned group.
-          Screenshot: ch-25-session-unpinned.png
-          PASS → session returned to regular list, no longer pinned
-          FAIL → session still in pinned section after unpinning
-
-          ================================================================
-          FINAL REPORT — output this exact block after all 8 scenarios
-          ================================================================
-
-          SESSION ACTIONS E2E TEST RESULTS
-          =================================
-          Scenario 18 (New Session No Menu)        : [PASS/FAIL] — [evidence]
-          Scenario 19 (Menu After Message)         : [PASS/FAIL] — [evidence]
-          Scenario 20 (Menu Has Pin & Rename)      : [PASS/FAIL] — [evidence]
-          Scenario 21 (New Session No Menu Again)  : [PASS/FAIL] — [evidence]
-          Scenario 22 (Rename Session)             : [PASS/FAIL] — [evidence]
-          Scenario 23 (Rename Persists)            : [PASS/FAIL] — [evidence]
-          Scenario 24 (Pin Session)                : [PASS/FAIL] — [evidence]
-          Scenario 25 (Unpin Session)              : [PASS/FAIL] — [evidence]
-
-          Overall     : [X/8 PASSED]
-          Screenshots : [comma-separated list of all files saved]
-        output: "session_actions_results"
-        timeout: 600
-
     # -----------------------------------------------------------------------
     # APPROVAL GATE — pause before Slack bridge tests
     # -----------------------------------------------------------------------
     approval:
       required: true
       prompt: |
-        Chat E2E tests complete (16 single-surface + 3 cross-surface + 8 session-actions scenarios).
+        Chat E2E tests complete (25 scenarios: 5 core + 6 sessions + 5 commands + 8 session-actions + 3 cross-surface).
 
-        Single-Surface Results (S01–S16)
-        ---------------------------------
-        {{chat_results}}
+        Core Results (S01-S05)
+        ----------------------
+        {{chat_results_core}}
 
-        Cross-Surface Results (S17A–S17C)
-        ----------------------------------
-        {{multi_surface_results}}
+        Sessions Results (S06-S11)
+        --------------------------
+        {{chat_results_sessions}}
 
-        Session Actions Results (S18–S25)
+        Commands Results (S12-S16)
+        --------------------------
+        {{chat_results_commands}}
+
+        Session Actions Results (S18-S25)
         ----------------------------------
         {{session_actions_results}}
+
+        Cross-Surface Results (S17A-S17C)
+        ----------------------------------
+        {{multi_surface_results}}
 
         ---------------------------------------------------------------
         Ready to run Slack bridge tests.
@@ -859,25 +991,22 @@ stages:
             agent-browser command. Persists Slack login across runs.
             Do NOT use --session for this stage.
           - Take a screenshot at every meaningful step.
+          - Save all screenshots to {{screenshot_dir}}/
           - Name screenshots descriptively: sl-01-login-check.png, etc.
           - Report each scenario as exactly PASS or FAIL plus evidence.
           - CRITICAL: Extract the session ID from the @Distro new reply in
             Scenario 3 and reuse it verbatim in Scenario 5.
             Record it as: CAPTURED_ID=<the-exact-id>
+          {{browser_setup}}
 
           RESILIENCE & FAILURE BEHAVIOR
-          ------------------------------
-          - If an expected UI element is missing or renamed, search the full
-            accessibility tree (snapshot -ic) for alternatives — the UI may
-            have changed while the functionality remains. Try 2-3 approaches
-            before giving up on a scenario.
-          - If you truly cannot proceed (server error, auth wall, page crash),
-            mark the scenario as BLOCKED with evidence and continue to the next.
-          - Do NOT attempt to diagnose root causes or fix application bugs.
-            When a verification fails, document what you expected vs what you
-            observed, take a screenshot, and move on to the next scenario.
-
-          {{browser_setup}}
+          -----------------------------
+          - If a scenario fails, record it as FAIL and continue to the next scenario.
+            Do NOT stop the entire test run for a single failure.
+          - If an element is not found, wait up to 10s with retries before reporting FAIL.
+          - Use ONLY the target workspace URL provided ({{slack_workspace}}). Do NOT
+            scan for alternative URLs, do NOT start or restart any server, do NOT
+            modify the application. If the workspace is unreachable, report BLOCKED.
 
           Target workspace : {{slack_workspace}}
           Target channel   : #{{slack_channel}}
@@ -1035,21 +1164,29 @@ stages:
         prompt: |
           Validate the complete end-to-end browser test run for amplifier-distro.
 
-          TEST CONTEXT
-          ------------
-          {{test_context}}
+          SERVER INFO
+          -----------
+          {{server_info}}
 
-          CHAT RESULTS (S01–S16)
-          ----------------------
-          {{chat_results}}
+          CHAT CORE RESULTS (S01-S05)
+          ---------------------------
+          {{chat_results_core}}
 
-          CROSS-SURFACE RESULTS (S17A–S17C)
-          ----------------------------------
-          {{multi_surface_results}}
+          CHAT SESSIONS RESULTS (S06-S11)
+          --------------------------------
+          {{chat_results_sessions}}
 
-          SESSION ACTIONS RESULTS (S18–S25)
+          CHAT COMMANDS RESULTS (S12-S16)
+          --------------------------------
+          {{chat_results_commands}}
+
+          SESSION ACTIONS RESULTS (S18-S25)
           ----------------------------------
           {{session_actions_results}}
+
+          CROSS-SURFACE RESULTS (S17A-S17C)
+          ----------------------------------
+          {{multi_surface_results}}
 
           SLACK BRIDGE RESULTS
           --------------------
@@ -1066,14 +1203,17 @@ stages:
                 it always starts in draft mode
             03. Send message → user bubble → streaming → bot responds with markdown
             04. Stop button cancels generation (SKIP accepted if response completed
-                before Stop could be clicked)
+                before Stop could be clicked; FAIL only if Stop was clicked and
+                acknowledged but no cancellation system message appeared)
             05. Shift+Enter inserts newline without sending
             06. Session metadata shows sid, absolute CWD, and turn count
             07. Click history session → transcript renders in chat area
             08. Filter by text shows match count; sid: filter narrows to 1 session
             09. Sort toggle changes between time and directory grouping
             10. + New clears chat, shows CWD editor, session in draft state (turn 0)
-            11. fill CWD to /tmp → /tmp persists after page reload → bot confirms /tmp
+            11. fill CWD to /tmp → click +New → send message → bot confirms /tmp →
+                session metadata shows /tmp → reload page → click session →
+                metadata still shows /tmp (server-side persistence)
             12. / opens popup ≥8 commands; arrow keys navigate; Escape closes
             13. /help outputs system message listing slash commands
             14. /clear empties chat without page reload
@@ -1121,7 +1261,7 @@ stages:
           CHAT SURFACE  ({{server_url}}/apps/chat/)
           --------------------------------------------------
           [PASS/FAIL     ] S01 — Page title "Amplifier Chat" + status dot green
-          [PASS/FAIL     ] S02 — Session history present, "No active session", CWD input
+          [PASS/FAIL     ] S02 — Session history present, draft state, CWD input
           [PASS/FAIL     ] S03 — Send message → streaming → markdown bot response
           [PASS/FAIL/SKIP] S04 — Stop/cancel during execution
           [PASS/FAIL     ] S05 — Shift+Enter inserts newline
@@ -1130,7 +1270,7 @@ stages:
           [PASS/FAIL     ] S08 — Filter by text and sid: prefix
           [PASS/FAIL     ] S09 — Sort mode toggle (time ↔ dir)
           [PASS/FAIL     ] S10 — + New session: clean state, CWD input visible
-          [PASS/FAIL     ] S11 — CWD /tmp persists and bot confirms /tmp
+          [PASS/FAIL     ] S11 — CWD /tmp → bot confirms → persists after reload
           [PASS/FAIL     ] S12 — Slash popup: 8+ commands, arrow nav, Escape
           [PASS/FAIL     ] S13 — /help: system message with command list
           [PASS/FAIL     ] S14 — /clear: empties chat without reload
@@ -1138,15 +1278,6 @@ stages:
           [PASS/FAIL     ] S16 — Theme toggle: switches + persists after reload
 
           Chat Result : [PASS (16/16) | PARTIAL (x/16) | FAIL (x/16)]
-          (SKIPs: [list any SKIPs with reason])
-
-          CROSS-SURFACE AWARENESS  (two simultaneous browser sessions)
-          -------------------------------------------------------------
-          [PASS/FAIL     ] S17A — New session on Surface A → "New" badge on Surface C
-          [PASS/FAIL     ] S17B — Message to inactive session → "Updated" badge on Surface C
-          [PASS/FAIL/SKIP] S17C — Active + scrolled up → "New messages ↓" pill on Surface C
-
-          Cross-Surface Result : [PASS (3/3) | PARTIAL (x/3) | FAIL (x/3)]
           (SKIPs: [list any SKIPs with reason])
 
           SESSION ACTIONS  (overflow menu guards, rename, pin/unpin)
@@ -1161,6 +1292,15 @@ stages:
           [PASS/FAIL] S25 — Unpin session back to regular list
 
           Session Actions Result : [PASS (8/8) | PARTIAL (x/8) | FAIL (x/8)]
+
+          CROSS-SURFACE AWARENESS  (two simultaneous browser sessions)
+          -------------------------------------------------------------
+          [PASS/FAIL     ] S17A — New session on Surface A → "New" badge on Surface C
+          [PASS/FAIL     ] S17B — Message to inactive session → "Updated" badge on Surface C
+          [PASS/FAIL/SKIP] S17C — Active + scrolled up → "New messages ↓" pill on Surface C
+
+          Cross-Surface Result : [PASS (3/3) | PARTIAL (x/3) | FAIL (x/3)]
+          (SKIPs: [list any SKIPs with reason])
 
           SLACK BRIDGE  ({{slack_workspace}} -> #{{slack_channel}})
           ----------------------------------------------------------
@@ -1179,15 +1319,12 @@ stages:
           OVERALL : [ALL PASS | PARTIAL | FAILURES FOUND]
           ================================================================
 
-          Test Context  : {{test_context}}
-
-          [If any FAILs — list each with evidence for issue filing:]
-            - [surface] SN: [what was expected] vs [what was observed]
-
-          To file GitHub issues for failures:
-            Approve the next gate to auto-file to {{target_repo}}.
+          [If any FAILs — list each with a recommended next step:]
+            - [surface] SN: [reason] -> [suggested fix / retest step]
         output: "final_report"
         timeout: 300
+
+
 
     approval:
       required: true
@@ -1199,14 +1336,14 @@ stages:
         Would you like to file GitHub issues for FAILed scenarios
         to {{target_repo}}?
 
-        Approve → Create one issue per FAIL with full repro context
-        Deny    → Skip issue filing (results saved above)
+        Approve -> Create one issue per FAIL with full repro context
+        Deny    -> Skip issue filing (results saved above)
       timeout: 0
       default: "deny"
 
 
   # =========================================================================
-  # STAGE 5: file-issues (only runs if user approves)
+  # STAGE: file-issues (only runs if user approves)
   # =========================================================================
   - name: "file-issues"
     steps:
@@ -1223,21 +1360,41 @@ stages:
           {{final_report}}
 
           For each FAIL result, run:
-            gh issue create -R {{target_repo}} \
-              --title "[<test_date from context>] E2E <scenario_id>: <brief description>" \
-              --body "<full body>" \
+            gh issue create -R {{target_repo}} \\
+              --title "[<date from test_context>] E2E <scenario_id>: <brief description>" \\
+              --body "<full body>" \\
               --label "bug,chat"
 
           Issue body must include:
           1. Scenario description (what was being tested)
           2. Expected vs actual behavior
-          3. Screenshot names that were captured
+          3. Screenshot names captured
           4. Test context: git commit, branch, date, server URL
-          5. Steps to reproduce (how to re-run this specific scenario)
+          5. Steps to reproduce
 
-          For SKIP results, do NOT create issues (timing-dependent, not bugs).
-          For PASS results, skip.
-
+          For SKIP results, do NOT create issues.
           Report each created issue URL. If no FAILs, report "No issues to file."
         output: "issues_filed"
         timeout: 300
+
+
+  # =========================================================================
+  # STAGE 5: cleanup
+  # =========================================================================
+  - name: "cleanup"
+    steps:
+      - id: "cleanup"
+        type: "bash"
+        command: |
+          # Kill server if we started it
+          PID=$(echo "{{server_info}}" | grep -o 'server_pid=[0-9]*' | cut -d= -f2 || echo "0")
+          if [ "$PID" != "0" ] && [ -n "$PID" ]; then
+            kill $PID 2>/dev/null && echo "Server (PID $PID) stopped" || echo "Server already stopped"
+          fi
+          # Clean up screenshots
+          if [ -d "{{screenshot_dir}}" ]; then
+            rm -rf "{{screenshot_dir}}"
+            echo "Screenshots cleaned up from {{screenshot_dir}}"
+          fi
+        output: "cleanup_result"
+        timeout: 30
