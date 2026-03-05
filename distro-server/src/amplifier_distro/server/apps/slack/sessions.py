@@ -273,11 +273,18 @@ class SlackSessionManager:
         )
         return mapping
 
-    async def route_message(self, message: SlackMessage) -> str | None:
+    async def route_message(
+        self, message: SlackMessage, text_override: str | None = None
+    ) -> str | None:
         """Route a Slack message to the appropriate Amplifier session.
 
         Returns the response text, or None if no session is mapped.
         Updates the last_active timestamp on the mapping.
+
+        Args:
+            message: The Slack message to route.
+            text_override: If provided, send this text instead of message.text.
+                Used for enriched prompts with context metadata.
         """
         mapping = self.get_mapping(message.channel_id, message.thread_ts)
         if mapping is None or not mapping.is_active:
@@ -287,10 +294,11 @@ class SlackSessionManager:
         mapping.last_active = datetime.now(UTC).isoformat()
         self._save_sessions()
 
-        # Send to backend
+        # Send to backend (use enriched text if provided)
+        prompt = text_override if text_override is not None else message.text
         try:
             response = await self._backend.send_message(
-                mapping.session_id, message.text
+                mapping.session_id, prompt
             )
             return response
         except ValueError:

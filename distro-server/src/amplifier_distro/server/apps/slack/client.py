@@ -57,6 +57,20 @@ class SlackClient(Protocol):
         """Get the bot's own user ID."""
         ...
 
+    async def upload_file(
+        self,
+        channel: str,
+        thread_ts: str | None = None,
+        filepath: str = "",
+        title: str = "",
+    ) -> None:
+        """Upload a file to a channel/thread."""
+        ...
+
+    async def delete_message(self, channel: str, ts: str) -> None:
+        """Delete a message."""
+        ...
+
 
 @dataclass
 class SentMessage:
@@ -138,6 +152,26 @@ class MemorySlackClient:
 
     async def get_bot_user_id(self) -> str:
         return self.bot_user_id
+
+    async def upload_file(
+        self,
+        channel: str,
+        thread_ts: str | None = None,
+        filepath: str = "",
+        title: str = "",
+    ) -> None:
+        self.sent_messages.append(
+            SentMessage(
+                channel=channel,
+                text=f"[file upload: {title or filepath}]",
+                thread_ts=thread_ts,
+                blocks=None,
+                ts=self._next_ts(),
+            )
+        )
+
+    async def delete_message(self, channel: str, ts: str) -> None:
+        pass  # No-op for testing
 
 
 class HttpSlackClient:
@@ -227,3 +261,37 @@ class HttpSlackClient:
             self._bot_user_id = result["user_id"]
         assert self._bot_user_id is not None
         return self._bot_user_id
+
+    async def upload_file(
+        self,
+        channel: str,
+        thread_ts: str | None = None,
+        filepath: str = "",
+        title: str = "",
+    ) -> None:
+        """Upload a file to Slack via files.upload (v1 API)."""
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            with open(filepath, "rb") as f:
+                data = {
+                    "channels": channel,
+                    "title": title or filepath,
+                }
+                if thread_ts:
+                    data["thread_ts"] = thread_ts
+                response = await client.post(
+                    f"{self._base_url}/files.upload",
+                    headers={"Authorization": f"Bearer {self._token}"},
+                    data=data,
+                    files={"file": (title or "file", f)},
+                )
+                result = response.json()
+                if not result.get("ok"):
+                    raise RuntimeError(
+                        f"Slack file upload error: {result.get('error', 'unknown')}"
+                    )
+
+    async def delete_message(self, channel: str, ts: str) -> None:
+        """Delete a message from a channel."""
+        await self._api_call("chat.delete", channel=channel, ts=ts)

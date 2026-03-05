@@ -11,10 +11,13 @@ Security:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
+import re as _re
 import time
+from pathlib import Path
 from typing import Any
 
 from .client import SlackClient
@@ -23,6 +26,31 @@ from .config import SlackConfig
 from .formatter import SlackFormatter
 from .models import SlackMessage
 from .sessions import SlackSessionManager
+
+# Friendly names for tool operations shown in progress messages
+TOOL_FRIENDLY_NAMES: dict[str, str] = {
+    "read_file": "Reading files",
+    "write_file": "Writing files",
+    "edit_file": "Editing files",
+    "apply_patch": "Applying patches",
+    "bash": "Running command",
+    "grep": "Searching",
+    "glob": "Finding files",
+    "delegate": "Delegating to agent",
+    "web_search": "Searching the web",
+    "web_fetch": "Fetching web content",
+    "python_check": "Checking code quality",
+    "LSP": "Analyzing code",
+    "todo": "Planning tasks",
+    "recipes": "Running recipe",
+    "mode": "Switching mode",
+}
+
+# Max file size for downloads (50 MB)
+_MAX_FILE_SIZE = 50 * 1024 * 1024
+
+# Progress message update throttle
+_STATUS_THROTTLE_SECS = 2.0
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +206,7 @@ class SlackEventHandler:
         # Check if there's a session mapping for this context
         mapping = self._sessions.get_mapping(channel_id, thread_ts)
         if mapping and mapping.is_active:
-            await self._handle_session_message(message)
+            await self._handle_session_message(message, event=event)
             return
 
         # No active session mapping for this context
@@ -402,13 +430,298 @@ class SlackEventHandler:
                     parts.append(text)
         return "\n".join(parts)
 
-    async def _handle_session_message(self, message: SlackMessage) -> None:
+    # --- Prompt enrichment (Task 1) ---
+
+    async def _build_prompt(
+        self,
+        message: SlackMessage,
+        file_descriptions: list[str] | None = None,
+    ) -> str:
+        """Build an enriched prompt with context metadata.
+
+        Wraps the user's raw text with sender/channel info and any
+        uploaded file descriptions so the AI has full context.
+        """
+        parts: list[str] = []
+
+        # Sender and channel context
+        channel_info = await self._client.get_channel_info(message.channel_id)
+        channel_label = f"#{channel_info.name}" if channel_info else message.channel_id
+        parts.append(f"[From <@{message.user_id}> in {channel_label}]")
+
+        # File descriptions (populated by _download_files)
+        if file_descriptions:
+            parts.append("[User uploaded files:")
+            parts.extend(f"  {desc}" for desc in file_descriptions)
+            parts.append("]")
+
+        # The actual user message
+        parts.append(message.text)
+
+        return "\n".join(parts)
+
+    # --- File download (Task 2) ---
+
+    async def _download_files(
+        self,
+        event: dict[str, Any],
+        working_dir: str,
+        channel_id: str = "",
+        thread_ts: str = "",
+    ) -> list[str]:
+        """Download files attached to a Slack message.
+
+        Returns a list of description strings like:
+            "report.py (1234 bytes) -> ./report.py"
+
+        On failure, posts an error message to the Slack thread so
+        the user knows what went wrong.
+        """
+        files = event.get("files", [])
+        if not files:
+            return []
+
+        descriptions: list[str] = []
+        errors: list[str] = []
+        wd = Path(working_dir).expanduser()
+        wd.mkdir(parents=True, exist_ok=True)
+
+        for file_info in files:
+            url = file_info.get("url_private")
+            name = file_info.get("name", "file")
+            size = file_info.get("size", 0)
+
+            if not url:
+                errors.append(f"{name}: no download URL available")
+                continue
+
+            # Enforce size limit
+            if size > _MAX_FILE_SIZE:
+                errors.append(f"{name}: file too large ({size:,} bytes, max 50MB)")
+                logger.warning("File %s too large (%d bytes), skipping", name, size)
+                continue
+
+            # Sanitize filename
+            safe_name = _re.sub(r"[^\w\-.]", "_", name)
+
+            # Handle filename conflicts
+            dest = wd / safe_name
+            counter = 1
+            while dest.exists():
+                stem = Path(safe_name).stem
+                suffix = Path(safe_name).suffix
+                dest = wd / f"{stem}_{counter}{suffix}"
+                counter += 1
+
+            # Download
+            try:
+                import aiohttp  # pyright: ignore[reportMissingImports]
+
+                async with aiohttp.ClientSession() as session:
+                    headers = {"Authorization": f"Bearer {self._config.bot_token}"}
+                    async with session.get(url, headers=headers) as resp:
+                        if resp.status == 200:
+                            data = await resp.read()
+                            # Detect HTML redirect (missing files:read scope)
+                            content_type = resp.headers.get("Content-Type", "")
+                            if "text/html" in content_type or (
+                                len(data) < 10000
+                                and data[:15].lower().startswith(b"<!doctype html")
+                            ):
+                                errors.append(
+                                    f"{name}: got HTML instead of file content "
+                                    "(Slack app needs `files:read` scope -- "
+                                    "reinstall the app with updated permissions)"
+                                )
+                                logger.warning(
+                                    "File %s returned HTML instead of content. "
+                                    "Add files:read scope and reinstall.",
+                                    name,
+                                )
+                                continue
+                            dest.write_bytes(data)
+                            descriptions.append(
+                                f"{name} ({size} bytes) -> ./{dest.name}"
+                            )
+                            logger.info("Downloaded %s -> %s", name, dest)
+                        elif resp.status == 403:
+                            errors.append(
+                                f"{name}: access denied (HTTP 403). "
+                                "Slack app needs `files:read` scope."
+                            )
+                            logger.warning(
+                                "File download 403 for %s -- missing files:read scope",
+                                name,
+                            )
+                        else:
+                            errors.append(
+                                f"{name}: download failed (HTTP {resp.status})"
+                            )
+                            logger.warning(
+                                "Failed to download %s: HTTP %d", name, resp.status
+                            )
+            except ImportError:
+                errors.append(
+                    "File downloads require aiohttp. "
+                    "Install with: `uv pip install amplifier-distro[slack]`"
+                )
+                logger.warning("aiohttp not available for file downloads")
+                break
+            except Exception:
+                errors.append(f"{name}: download failed (unexpected error)")
+                logger.exception("Error downloading file %s", name)
+
+        # Post errors to the Slack thread so the user sees them
+        if errors and channel_id:
+            error_text = ":warning: *File download issues:*\n" + "\n".join(
+                f"\u2022 {e}" for e in errors
+            )
+            try:
+                await self._client.post_message(
+                    channel_id, text=error_text, thread_ts=thread_ts or None
+                )
+            except Exception:
+                logger.debug("Failed to post file error to Slack", exc_info=True)
+
+        return descriptions
+
+    # --- Progress messages (Tasks 4-6) ---
+
+    def _friendly_tool_name(self, tool_name: str) -> str:
+        """Map internal tool names to user-friendly labels."""
+        return TOOL_FRIENDLY_NAMES.get(tool_name, tool_name.replace("_", " ").title())
+
+    @staticmethod
+    def _render_todo_status(todos: list[dict[str, Any]]) -> str:
+        """Render a todo list as a compact progress display.
+
+        Shows completed count, current in-progress item, next few
+        pending items, and a +N more indicator.
+        """
+        completed = [t for t in todos if t.get("status") == "completed"]
+        in_progress = [t for t in todos if t.get("status") == "in_progress"]
+        pending = [t for t in todos if t.get("status") == "pending"]
+
+        lines: list[str] = []
+
+        # Completed summary
+        if completed:
+            lines.append(f"\u2705  {len(completed)} completed")
+
+        # In-progress (show all, usually just one)
+        for t in in_progress:
+            content = t.get("activeForm") or t.get("content", "Working")
+            lines.append(f"\u25b8  *{content}*")
+
+        # Pending (show next 2, then +N more)
+        shown_pending = pending[:2]
+        for t in shown_pending:
+            content = t.get("content", "")
+            lines.append(f"\u25cb  {content}")
+
+        remaining = len(pending) - len(shown_pending)
+        if remaining > 0:
+            lines.append(f"   +{remaining} more")
+
+        return "\n".join(lines)
+
+    async def _execute_with_progress(
+        self,
+        message: SlackMessage,
+        enriched_text: str,
+    ) -> str | None:
+        """Execute a session message with a live progress indicator.
+
+        Posts an editable "Working..." status message, runs the prompt
+        via send_message() (which blocks until complete), updates the
+        status with elapsed time while waiting, then deletes the status
+        message and returns the response.
+        """
+        mapping = self._sessions.get_mapping(message.channel_id, message.thread_ts)
+        if mapping is None or not mapping.is_active:
+            return None
+
+        reply_thread = message.thread_ts or message.ts
+
+        # Post initial status message
+        status_ts = await self._client.post_message(
+            message.channel_id,
+            text="\u2699\ufe0f Working...",
+            thread_ts=reply_thread,
+        )
+
+        start_time = time.monotonic()
+
+        async def _update_status_loop() -> None:
+            """Periodically update the status message with elapsed time."""
+            while True:
+                await asyncio.sleep(_STATUS_THROTTLE_SECS)
+                elapsed = time.monotonic() - start_time
+                if elapsed < 10:
+                    continue  # Don't show elapsed for quick responses
+                minutes = int(elapsed) // 60
+                seconds = int(elapsed) % 60
+                elapsed_str = (
+                    f"{minutes}m {seconds:02d}s" if minutes else f"{seconds}s"
+                )
+                try:
+                    await self._client.update_message(
+                        message.channel_id,
+                        status_ts,
+                        text=f"\u2699\ufe0f Working... \u00b7 {elapsed_str}",
+                    )
+                except Exception:
+                    logger.debug("Failed to update status message", exc_info=True)
+
+        # Run the execution and status updater concurrently
+        status_task = asyncio.create_task(_update_status_loop())
+        try:
+            response = await self._sessions.route_message(
+                message, text_override=enriched_text
+            )
+        except Exception:
+            logger.exception("Error during session execution")
+            response = "Error: Failed to get response from Amplifier session."
+        finally:
+            status_task.cancel()
+
+        # Delete the status message
+        try:
+            await self._client.delete_message(message.channel_id, status_ts)
+        except Exception:
+            logger.debug("Failed to delete status message", exc_info=True)
+
+        return response
+
+    # --- Session message handler (rewritten) ---
+
+    async def _handle_session_message(
+        self,
+        message: SlackMessage,
+        event: dict[str, Any] | None = None,
+    ) -> None:
         """Route a message to its mapped Amplifier session."""
         # Add thinking indicator (best-effort)
         await self._safe_react(message.channel_id, message.ts, "hourglass_flowing_sand")
 
-        # Route through session manager
-        response = await self._sessions.route_message(message)
+        # Look up the session mapping for file download and outbox
+        mapping = self._sessions.get_mapping(message.channel_id, message.thread_ts)
+
+        # Download attached files if present
+        file_descriptions: list[str] | None = None
+        if event and event.get("files") and mapping and mapping.working_dir:
+            file_descriptions = await self._download_files(
+                event,
+                mapping.working_dir,
+                channel_id=message.channel_id,
+                thread_ts=message.thread_ts or message.ts,
+            )
+
+        # Build enriched prompt with context
+        enriched_text = await self._build_prompt(message, file_descriptions)
+
+        # Execute with live progress updates
+        response = await self._execute_with_progress(message, enriched_text)
 
         if response:
             reply_thread = message.thread_ts or message.ts
