@@ -8,10 +8,10 @@ description: >
   menu guards, rename, and pin/unpin. An approval gate pauses for Slack login
   confirmation. Stage 3 runs 8 Slack-bridge scenarios. Stage 4 validates and
   produces a final PASS/FAIL summary table.
-version: "1.4.0"
+version: "1.5.0"
 author: "amplifier-distro team"
 created: "2026-02-20T14:32:00Z"
-updated: "2026-03-03T06:00:00Z"
+updated: "2026-03-05T08:00:00Z"
 tags:
   - e2e
   - browser-testing
@@ -27,7 +27,9 @@ context:
   server_url: "http://127.0.0.1:8400"  # Supports both http:// and https://
   slack_workspace: "https://amplifiercrew.slack.com/"
   slack_channel: "amplifier"
-  browser_setup: ""  # Optional context for browser setup (e.g., CDP connection, RDP config)
+  browser_setup: ""  # Optional: CDP connection instructions (e.g., "agent-browser connect 9222 && agent-browser tab new")
+  browser_mode: "headless"  # "headless" (default, CI-friendly) or "headed" (watch tests run)
+  target_repo: "microsoft/amplifier-distro"  # GitHub repo for filing issues
 
 # ---------------------------------------------------------------------------
 # Stages
@@ -60,6 +62,19 @@ stages:
         timeout: 30
         on_error: "fail"
 
+      - id: "capture-context"
+        type: "bash"
+        command: |
+          set -e
+          commit=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+          full_commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+          branch=$(git branch --show-current 2>/dev/null || echo "unknown")
+          test_date=$(date -u +%Y-%m-%d)
+          echo "commit=${commit} (${branch}) | date=${test_date} | server={{server_url}}"
+          echo "full_commit=${full_commit}"
+        output: "test_context"
+        timeout: 10
+
 
   # =========================================================================
   # STAGE 2: chat-tests
@@ -86,12 +101,27 @@ stages:
 
           MANDATORY RULES
           ---------------
-          - Use --headed on EVERY SINGLE agent-browser command. No exceptions.
+          - Browser display: {{browser_mode}}. If "headed", add --headed to
+            every agent-browser command so the user can watch. If "headless"
+            (default), omit --headed for faster CI-friendly execution.
           - Use --session chat-e2e on EVERY agent-browser command.
           - Take a screenshot at every meaningful step. Name them descriptively.
           - Report each scenario as exactly PASS, FAIL, or SKIP (with reason).
           - Build on prior state — do NOT reload the page between scenarios
             unless a scenario explicitly says to reload.
+
+          RESILIENCE & FAILURE BEHAVIOR
+          ------------------------------
+          - If an expected UI element is missing or renamed, search the full
+            accessibility tree (snapshot -ic) for alternatives — the UI may
+            have changed while the functionality remains. Try 2-3 approaches
+            before giving up on a scenario.
+          - If you truly cannot proceed (server error, auth wall, page crash),
+            mark the scenario as BLOCKED with evidence and continue to the next.
+          - Do NOT attempt to diagnose root causes or fix application bugs.
+            When a verification fails, document what you expected vs what you
+            observed, take a screenshot, and move on to the next scenario.
+
           {{browser_setup}}
 
           Target base URL: {{server_url}}
@@ -435,15 +465,30 @@ stages:
 
           MANDATORY RULES
           ---------------
+          - Browser display: {{browser_mode}}. If "headed", add --headed to
+            every agent-browser command. If "headless" (default), omit --headed.
           - EVERY agent-browser command must explicitly specify its target session:
-              Surface C (observer) : --headed --session surface-c
-              Surface A (actor)    : --headed --session surface-a
+              Surface C (observer) : --session surface-c
+              Surface A (actor)    : --session surface-a
           - NEVER omit the --session flag. Commands without it will go to the wrong surface.
           - Take a screenshot after every meaningful action on EITHER surface.
           - Name screenshots with a surface prefix:
               sc-17*.png  = Surface C (observer)
               sa-17*.png  = Surface A (actor)
           - Report sub-scenarios 17A, 17B, and 17C each as PASS, FAIL, or SKIP.
+
+          RESILIENCE & FAILURE BEHAVIOR
+          ------------------------------
+          - If an expected UI element is missing or renamed, search the full
+            accessibility tree (snapshot -ic) for alternatives â the UI may
+            have changed while the functionality remains. Try 2-3 approaches
+            before giving up on a scenario.
+          - If you truly cannot proceed (server error, auth wall, page crash),
+            mark the scenario as BLOCKED with evidence and continue to the next.
+          - Do NOT attempt to diagnose root causes or fix application bugs.
+            When a verification fails, document what you expected vs what you
+            observed, take a screenshot, and move on to the next scenario.
+
           {{browser_setup}}
 
           Target URL: {{server_url}}/apps/chat/
@@ -452,14 +497,14 @@ stages:
           SETUP — Open Both Surfaces
           ================================================================
           Step 1: Open Surface C (observer):
-            agent-browser --headed --session surface-c open {{server_url}}/apps/chat/
+            agent-browser --session surface-c open {{server_url}}/apps/chat/
             Wait 5 s for the page to load and WebSocket to connect.
             Snapshot the sessions panel to count current session cards.
             Screenshot: sc-17-setup-initial.png
             Record: INITIAL_COUNT=<number of session cards currently visible>
 
           Step 2: Open Surface A (actor):
-            agent-browser --headed --session surface-a open {{server_url}}/apps/chat/
+            agent-browser --session surface-a open {{server_url}}/apps/chat/
             Wait 5 s for the page to load and WebSocket to connect.
             Screenshot: sa-17-setup-initial.png
 
@@ -597,12 +642,27 @@ stages:
 
           MANDATORY RULES
           ---------------
-          - Use --headed on EVERY SINGLE agent-browser command. No exceptions.
+          - Browser display: {{browser_mode}}. If "headed", add --headed to
+            every agent-browser command so the user can watch. If "headless"
+            (default), omit --headed for faster CI-friendly execution.
           - Use --session chat-session-actions on EVERY agent-browser command.
           - Take a screenshot at every meaningful step. Name them descriptively.
           - Report each scenario as exactly PASS, FAIL, or SKIP (with reason).
           - Build on prior state — do NOT reload the page between scenarios
             unless a scenario explicitly says to reload.
+
+          RESILIENCE & FAILURE BEHAVIOR
+          ------------------------------
+          - If an expected UI element is missing or renamed, search the full
+            accessibility tree (snapshot -ic) for alternatives — the UI may
+            have changed while the functionality remains. Try 2-3 approaches
+            before giving up on a scenario.
+          - If you truly cannot proceed (server error, auth wall, page crash),
+            mark the scenario as BLOCKED with evidence and continue to the next.
+          - Do NOT attempt to diagnose root causes or fix application bugs.
+            When a verification fails, document what you expected vs what you
+            observed, take a screenshot, and move on to the next scenario.
+
           {{browser_setup}}
 
           Target base URL: {{server_url}}
@@ -792,7 +852,9 @@ stages:
 
           MANDATORY RULES
           ---------------
-          - Use --headed on EVERY SINGLE agent-browser command. No exceptions.
+          - Browser display: {{browser_mode}}. If "headed", add --headed to
+            every agent-browser command so the user can watch. If "headless"
+            (default), omit --headed for faster CI-friendly execution.
           - Use --profile ~/.agent-browser/profiles/slack-distro-test on EVERY
             agent-browser command. Persists Slack login across runs.
             Do NOT use --session for this stage.
@@ -802,6 +864,19 @@ stages:
           - CRITICAL: Extract the session ID from the @Distro new reply in
             Scenario 3 and reuse it verbatim in Scenario 5.
             Record it as: CAPTURED_ID=<the-exact-id>
+
+          RESILIENCE & FAILURE BEHAVIOR
+          ------------------------------
+          - If an expected UI element is missing or renamed, search the full
+            accessibility tree (snapshot -ic) for alternatives — the UI may
+            have changed while the functionality remains. Try 2-3 approaches
+            before giving up on a scenario.
+          - If you truly cannot proceed (server error, auth wall, page crash),
+            mark the scenario as BLOCKED with evidence and continue to the next.
+          - Do NOT attempt to diagnose root causes or fix application bugs.
+            When a verification fails, document what you expected vs what you
+            observed, take a screenshot, and move on to the next scenario.
+
           {{browser_setup}}
 
           Target workspace : {{slack_workspace}}
@@ -960,6 +1035,10 @@ stages:
         prompt: |
           Validate the complete end-to-end browser test run for amplifier-distro.
 
+          TEST CONTEXT
+          ------------
+          {{test_context}}
+
           CHAT RESULTS (S01–S16)
           ----------------------
           {{chat_results}}
@@ -1100,7 +1179,65 @@ stages:
           OVERALL : [ALL PASS | PARTIAL | FAILURES FOUND]
           ================================================================
 
-          [If any FAILs — list each with a recommended next step:]
-            - [surface] SN: [reason] -> [suggested fix / retest step]
+          Test Context  : {{test_context}}
+
+          [If any FAILs — list each with evidence for issue filing:]
+            - [surface] SN: [what was expected] vs [what was observed]
+
+          To file GitHub issues for failures:
+            Approve the next gate to auto-file to {{target_repo}}.
         output: "final_report"
+        timeout: 300
+
+    approval:
+      required: true
+      prompt: |
+        E2E test run complete.
+
+        {{final_report}}
+
+        Would you like to file GitHub issues for FAILed scenarios
+        to {{target_repo}}?
+
+        Approve → Create one issue per FAIL with full repro context
+        Deny    → Skip issue filing (results saved above)
+      timeout: 0
+      default: "deny"
+
+
+  # =========================================================================
+  # STAGE 5: file-issues (only runs if user approves)
+  # =========================================================================
+  - name: "file-issues"
+    steps:
+      - id: "create-issues"
+        agent: "self"
+        prompt: |
+          Based on the E2E test results below, create GitHub issues for each
+          FAILed scenario in {{target_repo}} using the gh CLI.
+
+          TEST CONTEXT
+          {{test_context}}
+
+          FULL TEST REPORT
+          {{final_report}}
+
+          For each FAIL result, run:
+            gh issue create -R {{target_repo}} \
+              --title "[<test_date from context>] E2E <scenario_id>: <brief description>" \
+              --body "<full body>" \
+              --label "bug,chat"
+
+          Issue body must include:
+          1. Scenario description (what was being tested)
+          2. Expected vs actual behavior
+          3. Screenshot names that were captured
+          4. Test context: git commit, branch, date, server URL
+          5. Steps to reproduce (how to re-run this specific scenario)
+
+          For SKIP results, do NOT create issues (timing-dependent, not bugs).
+          For PASS results, skip.
+
+          Report each created issue URL. If no FAILs, report "No issues to file."
+        output: "issues_filed"
         timeout: 300
