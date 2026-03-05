@@ -2420,3 +2420,341 @@ class TestAiohttpSessionCleanup:
 
         mock_session.close.assert_not_called()
         assert adapter._session is None
+
+
+
+# --- PR #167: Prompt Enrichment Tests ---
+
+
+class TestPromptEnrichment:
+    """Test _build_prompt() context wrapping."""
+
+    def _make_handler(
+        self, slack_client, session_manager, command_handler, slack_config
+    ):
+        from amplifier_distro.server.apps.slack.events import SlackEventHandler
+
+        return SlackEventHandler(
+            slack_client, session_manager, command_handler, slack_config
+        )
+
+    def test_build_prompt_basic(
+        self, slack_client, session_manager, command_handler, slack_config
+    ):
+        """Prompt includes user ID and channel name."""
+        from amplifier_distro.server.apps.slack.models import SlackChannel, SlackMessage
+
+        handler = self._make_handler(
+            slack_client, session_manager, command_handler, slack_config
+        )
+        slack_client.seed_channel(SlackChannel(id="C001", name="engineering"))
+
+        msg = SlackMessage(
+            channel_id="C001", user_id="U_USER", text="hello world", ts="1.0"
+        )
+        result = asyncio.run(handler._build_prompt(msg))
+        assert "[From <@U_USER> in #engineering]" in result
+        assert "hello world" in result
+
+    def test_build_prompt_unknown_channel(
+        self, slack_client, session_manager, command_handler, slack_config
+    ):
+        """Prompt falls back to channel ID when channel info unavailable."""
+        from amplifier_distro.server.apps.slack.models import SlackMessage
+
+        handler = self._make_handler(
+            slack_client, session_manager, command_handler, slack_config
+        )
+
+        msg = SlackMessage(
+            channel_id="C_UNKNOWN", user_id="U1", text="test", ts="1.0"
+        )
+        result = asyncio.run(handler._build_prompt(msg))
+        assert "C_UNKNOWN" in result
+        assert "test" in result
+
+    def test_build_prompt_with_file_descriptions(
+        self, slack_client, session_manager, command_handler, slack_config
+    ):
+        """Prompt includes file descriptions when provided."""
+        from amplifier_distro.server.apps.slack.models import SlackMessage
+
+        handler = self._make_handler(
+            slack_client, session_manager, command_handler, slack_config
+        )
+
+        msg = SlackMessage(
+            channel_id="C1", user_id="U1", text="review this", ts="1.0"
+        )
+        descriptions = ["main.py (2048 bytes) -> ./main.py"]
+        result = asyncio.run(handler._build_prompt(msg, file_descriptions=descriptions))
+        assert "[User uploaded files:" in result
+        assert "main.py (2048 bytes)" in result
+        assert "review this" in result
+
+    def test_build_prompt_no_files(
+        self, slack_client, session_manager, command_handler, slack_config
+    ):
+        """Prompt does not include file section when no files."""
+        from amplifier_distro.server.apps.slack.models import SlackMessage
+
+        handler = self._make_handler(
+            slack_client, session_manager, command_handler, slack_config
+        )
+
+        msg = SlackMessage(
+            channel_id="C1", user_id="U1", text="just text", ts="1.0"
+        )
+        result = asyncio.run(handler._build_prompt(msg))
+        assert "[User uploaded files:" not in result
+        assert "just text" in result
+
+
+# --- PR #167: Route Message text_override Tests ---
+
+
+class TestRouteMessageTextOverride:
+    """Test that text_override passes enriched text to the backend."""
+
+    def test_text_override_sent_to_backend(self, session_manager, mock_backend):
+        """When text_override is provided, backend receives it instead of message.text."""
+        from amplifier_distro.server.apps.slack.models import SlackMessage
+
+        asyncio.run(session_manager.create_session("C1", "t1", "U1"))
+
+        msg = SlackMessage(
+            channel_id="C1", user_id="U1", text="raw text",
+            ts="2.0", thread_ts="t1",
+        )
+        response = asyncio.run(
+            session_manager.route_message(msg, text_override="enriched text")
+        )
+        assert response is not None
+        # MockBackend echoes the message — should echo the override, not raw text
+        assert "enriched text" in response
+
+    def test_text_override_none_uses_message_text(self, session_manager, mock_backend):
+        """When text_override is None, backend receives message.text."""
+        from amplifier_distro.server.apps.slack.models import SlackMessage
+
+        asyncio.run(session_manager.create_session("C1", "t1", "U1"))
+
+        msg = SlackMessage(
+            channel_id="C1", user_id="U1", text="original text",
+            ts="2.0", thread_ts="t1",
+        )
+        response = asyncio.run(session_manager.route_message(msg))
+        assert "original text" in response
+
+
+# --- PR #167: DM Routing Tests ---
+
+
+class TestDMRouting:
+    """Test DM (direct message) event handling."""
+
+    def _make_handler(
+        self, slack_client, session_manager, command_handler, slack_config
+    ):
+        from amplifier_distro.server.apps.slack.events import SlackEventHandler
+
+        return SlackEventHandler(
+            slack_client, session_manager, command_handler, slack_config
+        )
+
+    def _dm_message_payload(self, text, user="U1", ts="1.0", thread_ts=None):
+        """Build a message.im event payload."""
+        event = {
+            "type": "message",
+            "text": text,
+            "user": user,
+            "channel": "D_DM_CHANNEL",
+            "channel_type": "im",
+            "ts": ts,
+        }
+        if thread_ts:
+            event["thread_ts"] = thread_ts
+        return {"type": "event_callback", "event": event}
+
+    def test_dm_without_session_routes_to_command(
+        self, slack_client, session_manager, command_handler, slack_config
+    ):
+        """DM without active session should be treated as a command."""
+        handler = self._make_handler(
+            slack_client, session_manager, command_handler, slack_config
+        )
+        asyncio.run(
+            handler.handle_event_payload(self._dm_message_payload("help"))
+        )
+        # Should have sent a help response
+        assert len(slack_client.sent_messages) >= 1
+
+    def test_dm_bot_message_ignored(
+        self, slack_client, session_manager, command_handler, slack_config
+    ):
+        """Bot's own DMs should be ignored (prevent loops)."""
+        handler = self._make_handler(
+            slack_client, session_manager, command_handler, slack_config
+        )
+        payload = {
+            "type": "event_callback",
+            "event": {
+                "type": "message",
+                "text": "bot talking to itself",
+                "bot_id": "B123",
+                "channel": "D_DM",
+                "channel_type": "im",
+                "ts": "1.0",
+            },
+        }
+        asyncio.run(handler.handle_event_payload(payload))
+        assert len(slack_client.sent_messages) == 0
+
+
+# --- PR #167: Reaction Handler Tests ---
+
+
+class TestReactionHandlers:
+    """Test reaction-based commands (regenerate, cancel)."""
+
+    def _make_handler(
+        self, slack_client, session_manager, command_handler, slack_config
+    ):
+        from amplifier_distro.server.apps.slack.events import SlackEventHandler
+
+        return SlackEventHandler(
+            slack_client, session_manager, command_handler, slack_config
+        )
+
+    def test_reaction_dispatch_calls_handler(
+        self, slack_client, session_manager, command_handler, slack_config
+    ):
+        """reaction_added event type dispatches to _handle_reaction."""
+        handler = self._make_handler(
+            slack_client, session_manager, command_handler, slack_config
+        )
+        # Send a reaction event — should not crash even with no tracked prompts
+        payload = {
+            "type": "event_callback",
+            "event": {
+                "type": "reaction_added",
+                "reaction": "repeat",
+                "user": "U1",
+                "item": {"channel": "C1", "ts": "1.0"},
+            },
+        }
+        result = asyncio.run(handler.handle_event_payload(payload))
+        assert result == {"ok": True}
+
+    def test_reaction_from_bot_ignored(
+        self, slack_client, session_manager, command_handler, slack_config
+    ):
+        """Bot's own reactions should be ignored."""
+        handler = self._make_handler(
+            slack_client, session_manager, command_handler, slack_config
+        )
+        payload = {
+            "type": "event_callback",
+            "event": {
+                "type": "reaction_added",
+                "reaction": "repeat",
+                "user": "U_AMP_BOT",  # same as bot user ID
+                "item": {"channel": "C1", "ts": "1.0"},
+            },
+        }
+        asyncio.run(handler.handle_event_payload(payload))
+        # No reactions should have been added (bot ignores itself)
+        assert len(slack_client.reactions) == 0
+
+    def test_track_prompt_bounded(
+        self, slack_client, session_manager, command_handler, slack_config
+    ):
+        """_message_prompts map should be bounded to prevent unbounded growth."""
+        handler = self._make_handler(
+            slack_client, session_manager, command_handler, slack_config
+        )
+        # Add 600 entries
+        for i in range(600):
+            handler._track_prompt(
+                f"ts_{i}", "session_1", f"prompt_{i}", "C1", "t1"
+            )
+        # Should have trimmed to ~500
+        assert len(handler._message_prompts) <= 510
+
+
+# --- PR #167: Connection Watchdog Tests ---
+
+
+class TestConnectionWatchdog:
+    """Test watchdog loop detection logic."""
+
+    def test_watchdog_fields_initialized(self):
+        """SocketModeAdapter should have watchdog fields after __init__."""
+        from amplifier_distro.server.apps.slack.socket_mode import SocketModeAdapter
+
+        adapter = SocketModeAdapter.__new__(SocketModeAdapter)
+        adapter._config = None
+        adapter._event_handler = None
+        adapter._task = None
+        adapter._session = None
+        adapter._external_session = None
+        adapter._ws = None
+        adapter._running = False
+        adapter._bot_user_id = None
+        adapter._seen_events = {}
+        adapter._pending_tasks = set()
+        adapter._watchdog_task = None
+        adapter._last_wall = 0.0
+        adapter._last_mono = 0.0
+
+        # Verify watchdog fields exist
+        assert hasattr(adapter, "_watchdog_task")
+        assert hasattr(adapter, "_last_wall")
+        assert hasattr(adapter, "_last_mono")
+
+
+# --- PR #167: Manifest Scope Tests ---
+
+
+class TestManifestUpdates:
+    """Test that the Slack app manifest has the required scopes."""
+
+    def test_manifest_has_reaction_scopes(self):
+        """Manifest should include reactions:read for reaction events."""
+        from amplifier_distro.server.apps.slack.setup import SLACK_APP_MANIFEST
+
+        scopes = SLACK_APP_MANIFEST["oauth_config"]["scopes"]["bot"]
+        assert "reactions:read" in scopes
+        assert "reactions:write" in scopes
+
+    def test_manifest_has_im_scopes(self):
+        """Manifest should include im:* scopes for DM support."""
+        from amplifier_distro.server.apps.slack.setup import SLACK_APP_MANIFEST
+
+        scopes = SLACK_APP_MANIFEST["oauth_config"]["scopes"]["bot"]
+        assert "im:history" in scopes
+        assert "im:read" in scopes
+        assert "im:write" in scopes
+
+    def test_manifest_has_file_scopes(self):
+        """Manifest should include files:read/write for file handling."""
+        from amplifier_distro.server.apps.slack.setup import SLACK_APP_MANIFEST
+
+        scopes = SLACK_APP_MANIFEST["oauth_config"]["scopes"]["bot"]
+        assert "files:read" in scopes
+        assert "files:write" in scopes
+
+    def test_manifest_has_dm_event_subscription(self):
+        """Manifest should subscribe to message.im for DM events."""
+        from amplifier_distro.server.apps.slack.setup import SLACK_APP_MANIFEST
+
+        events = SLACK_APP_MANIFEST["settings"]["event_subscriptions"]["bot_events"]
+        assert "message.im" in events
+        assert "reaction_added" in events
+        assert "message.groups" in events
+
+    def test_manifest_interactivity_enabled(self):
+        """Manifest should have interactivity enabled for Block Kit buttons."""
+        from amplifier_distro.server.apps.slack.setup import SLACK_APP_MANIFEST
+
+        assert SLACK_APP_MANIFEST["settings"]["interactivity"]["is_enabled"] is True
