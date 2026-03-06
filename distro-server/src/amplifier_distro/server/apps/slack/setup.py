@@ -56,6 +56,7 @@ SLACK_APP_MANIFEST = {
         "scopes": {
             "bot": [
                 "app_mentions:read",
+                "assistant:write",
                 "channels:history",
                 "channels:read",
                 "chat:write",

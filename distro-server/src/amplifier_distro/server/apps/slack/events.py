@@ -23,6 +23,7 @@ from .config import SlackConfig
 from .formatter import SlackFormatter
 from .models import SlackMessage
 from .sessions import SlackSessionManager
+from .streamer import SlackStreamer
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class SlackEventHandler:
         self._commands = command_handler
         self._config = config
         self._bot_user_id: str | None = None
+        self._streamer: SlackStreamer | None = None
 
     async def get_bot_user_id(self) -> str:
         """Get and cache the bot's user ID."""
@@ -402,16 +404,51 @@ class SlackEventHandler:
                     parts.append(text)
         return "\n".join(parts)
 
+    def _ensure_streamer(self) -> SlackStreamer | None:
+        """Lazily create the streamer if backend supports it."""
+        if self._streamer is not None:
+            return self._streamer
+        backend = self._sessions._backend
+        # Streamer requires execute() + resume_session() on the backend
+        if hasattr(backend, "execute") and hasattr(backend, "resume_session"):
+            self._streamer = SlackStreamer(self._client, self._config, backend)
+        return self._streamer
+
     async def _handle_session_message(self, message: SlackMessage) -> None:
-        """Route a message to its mapped Amplifier session."""
+        """Route a message to its mapped Amplifier session.
+
+        Attempts real-time token streaming via Slack's streaming API.
+        Falls back to batch response if streaming is unavailable.
+        """
         # Add thinking indicator (best-effort)
         await self._safe_react(message.channel_id, message.ts, "hourglass_flowing_sand")
 
-        # Route through session manager
-        response = await self._sessions.route_message(message)
+        reply_thread = message.thread_ts or message.ts
+        response: str | None = None
+        streamed = False
 
-        if response:
-            reply_thread = message.thread_ts or message.ts
+        # Try streaming path first
+        mapping = self._sessions.get_mapping(message.channel_id, message.thread_ts)
+        streamer = self._ensure_streamer()
+
+        if streamer and mapping and mapping.is_active:
+            response = await streamer.execute_streaming(
+                session_id=mapping.session_id,
+                prompt=message.text,
+                channel=message.channel_id,
+                thread_ts=reply_thread,
+                working_dir=mapping.working_dir,
+                user_id=message.user_id,
+            )
+            if response is not None:
+                streamed = True
+
+        # Fall back to batch mode if streaming returned None
+        if response is None:
+            response = await self._sessions.route_message(message)
+
+        # Post response — only needed for batch mode (streaming already posted)
+        if response and not streamed:
             chunks = SlackFormatter.format_response(response)
             for chunk in chunks:
                 await self._client.post_message(
