@@ -596,25 +596,29 @@ class SlackEventHandler:
 
         # Cancel: stop running execution
         if reaction == "x":
-            # Find which session this message belongs to
+            session_id: str | None = None
+
+            # Try prompt tracking first
             prompt_info = self._message_prompts.get(message_ts)
             if prompt_info:
                 session_id = prompt_info[0]
                 logger.info("Cancel: found session %s via prompt tracking", session_id)
             else:
+                # Search all active mappings for this channel
                 logger.info(
-                    "Cancel: no prompt tracked for ts=%s, trying mapping lookup "
+                    "Cancel: no prompt tracked for ts=%s, searching active mappings "
                     "(channel=%s, tracked_prompts=%d)",
                     message_ts, channel, len(self._message_prompts),
                 )
-                # Try to find via mapping
-                mapping = self._sessions.get_mapping(channel)
-                if mapping:
-                    session_id = mapping.session_id
-                    logger.info("Cancel: found session %s via channel mapping", session_id)
-                else:
-                    logger.info("Cancel: no session found for channel=%s, ignoring", channel)
-                    return
+                for m in self._sessions.list_active():
+                    if m.channel_id == channel and m.is_active:
+                        session_id = m.session_id
+                        logger.info("Cancel: found session %s via active mapping scan", session_id)
+                        break
+
+            if session_id is None:
+                logger.info("Cancel: no session found for channel=%s, ignoring", channel)
+                return
 
             logger.info("Cancel requested for session %s", session_id)
             try:
