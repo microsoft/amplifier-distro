@@ -159,7 +159,7 @@ class HttpSlackClient:
         """Make a Slack API call."""
         import httpx
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{self._base_url}/{method}",
                 headers={"Authorization": f"Bearer {self._token}"},
