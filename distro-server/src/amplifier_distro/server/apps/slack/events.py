@@ -542,12 +542,19 @@ class SlackEventHandler:
         channel = item.get("channel", "")
         message_ts = item.get("ts", "")
 
+        logger.info(
+            "Reaction received: emoji=%s user=%s channel=%s ts=%s item=%s",
+            reaction, user, channel, message_ts, item,
+        )
+
         if not channel or not message_ts:
+            logger.info("Reaction ignored: missing channel or ts")
             return
 
         # Don't process our own reactions
         bot_user_id = await self.get_bot_user_id()
         if user == bot_user_id:
+            logger.debug("Reaction ignored: from bot itself")
             return
 
         # Regenerate: re-execute original prompt
@@ -593,12 +600,20 @@ class SlackEventHandler:
             prompt_info = self._message_prompts.get(message_ts)
             if prompt_info:
                 session_id = prompt_info[0]
+                logger.info("Cancel: found session %s via prompt tracking", session_id)
             else:
+                logger.info(
+                    "Cancel: no prompt tracked for ts=%s, trying mapping lookup "
+                    "(channel=%s, tracked_prompts=%d)",
+                    message_ts, channel, len(self._message_prompts),
+                )
                 # Try to find via mapping
                 mapping = self._sessions.get_mapping(channel)
                 if mapping:
                     session_id = mapping.session_id
+                    logger.info("Cancel: found session %s via channel mapping", session_id)
                 else:
+                    logger.info("Cancel: no session found for channel=%s, ignoring", channel)
                     return
 
             logger.info("Cancel requested for session %s", session_id)
