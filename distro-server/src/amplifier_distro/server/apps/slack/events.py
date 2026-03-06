@@ -621,11 +621,33 @@ class SlackEventHandler:
                 return
 
             logger.info("Cancel requested for session %s", session_id)
+
+            # Post visible feedback so the user knows cancel was received
+            reply_ts = await self._client.post_message(
+                channel,
+                text=":octagonal_sign: Cancelling...",
+                thread_ts=message_ts,
+            )
+
             try:
                 await self._sessions._backend.cancel_session(session_id, level="graceful")
                 await self._safe_react(channel, message_ts, "white_check_mark")
+                # Update the cancel message
+                try:
+                    await self._client.update_message(
+                        channel, reply_ts, text=":octagonal_sign: Cancelled."
+                    )
+                except Exception:
+                    pass
             except Exception:
                 logger.exception("Cancel failed for session %s", session_id)
+                try:
+                    await self._client.update_message(
+                        channel, reply_ts,
+                        text=":warning: Cancel requested but may not have taken effect.",
+                    )
+                except Exception:
+                    pass
             return
 
     def _track_prompt(
