@@ -625,7 +625,7 @@ class SlackEventHandler:
             # Post visible feedback so the user knows cancel was received
             reply_ts = await self._client.post_message(
                 channel,
-                text=":octagonal_sign: Cancelling...",
+                text=":octagonal_sign: Cancel requested — will stop after current step.",
                 thread_ts=message_ts,
             )
 
@@ -635,7 +635,7 @@ class SlackEventHandler:
                 # Update the cancel message
                 try:
                     await self._client.update_message(
-                        channel, reply_ts, text=":octagonal_sign: Cancelled."
+                        channel, reply_ts, text=":octagonal_sign: Cancel signal sent. The bot will stop after its current step completes."
                     )
                 except Exception:
                     pass
