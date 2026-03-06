@@ -103,7 +103,7 @@ class SocketModeAdapter:
     async def _resolve_bot_id(self) -> str | None:
         """Get the bot's own user ID via auth.test."""
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     "https://slack.com/api/auth.test",
                     headers={"Authorization": f"Bearer {self._config.bot_token}"},
