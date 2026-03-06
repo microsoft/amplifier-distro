@@ -625,17 +625,17 @@ class SlackEventHandler:
             # Post visible feedback so the user knows cancel was received
             reply_ts = await self._client.post_message(
                 channel,
-                text=":octagonal_sign: Cancel requested — will stop after current step.",
+                text=":octagonal_sign: Cancelling...",
                 thread_ts=message_ts,
             )
 
             try:
-                await self._sessions._backend.cancel_session(session_id, level="graceful")
+                await self._sessions._backend.cancel_session(session_id, level="immediate")
                 await self._safe_react(channel, message_ts, "white_check_mark")
                 # Update the cancel message
                 try:
                     await self._client.update_message(
-                        channel, reply_ts, text=":octagonal_sign: Cancel signal sent. The bot will stop after its current step completes."
+                        channel, reply_ts, text=":octagonal_sign: Cancelled."
                     )
                 except Exception:
                     pass
