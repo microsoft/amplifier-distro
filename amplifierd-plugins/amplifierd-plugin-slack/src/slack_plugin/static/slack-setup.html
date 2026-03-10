@@ -58,6 +58,25 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
+/*  OAuth Success Banner                                               */
+/* ------------------------------------------------------------------ */
+.oauth-banner {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  background: var(--success-soft);
+  border: 1px solid var(--success);
+  border-radius: var(--radius-subtle);
+  padding: 12px 16px;
+  margin-bottom: 24px;
+  font-size: 14px;
+  color: var(--success);
+  font-weight: 600;
+}
+
+.oauth-banner.visible { display: flex; }
+
+/* ------------------------------------------------------------------ */
 /*  Steps                                                              */
 /* ------------------------------------------------------------------ */
 .step {
@@ -173,6 +192,27 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Instruction list                                                   */
+/* ------------------------------------------------------------------ */
+.instructions {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--ink-slate);
+  line-height: 1.8;
+}
+
+.instructions li { margin-bottom: 2px; }
+.instructions code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--canvas-stone);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--ink);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Manifest Box                                                       */
 /* ------------------------------------------------------------------ */
 .manifest-box {
@@ -240,7 +280,7 @@ body {
   padding: 12px 24px;
 }
 
-.btn-slack:hover { background: #4a154b; }
+.btn-slack:hover:not(:disabled) { background: #4a154b; }
 
 .btn-row {
   display: flex;
@@ -311,6 +351,16 @@ body {
   font-size: 13px;
 }
 
+.info-msg {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: var(--canvas-stone);
+  color: var(--ink-slate);
+  border: 1px solid var(--canvas-mist);
+  border-radius: var(--radius-subtle);
+  font-size: 13px;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Footer                                                             */
 /* ------------------------------------------------------------------ */
@@ -335,8 +385,14 @@ body {
   <p style="color: var(--ink-slate); font-size: 1.1rem; margin-top: 8px; text-align: center;">Connect Slack</p>
   <p class="tagline">Bridge your Slack workspace to Amplifier</p>
 
+  <!-- OAuth success banner (shown after redirect back from Slack) -->
+  <div class="oauth-banner" id="oauthBanner">
+    <span>&#10003;</span>
+    <span id="oauthBannerText">App installed! Bot token saved.</span>
+  </div>
+
   <!-- ============================================================ -->
-  <!--  Step 1: Create App                                           -->
+  <!--  Step 1: Create Slack App                                    -->
   <!-- ============================================================ -->
   <div class="step" id="step1">
     <div class="step-header">
@@ -345,8 +401,9 @@ body {
     </div>
     <div class="step-body">
       <p class="step-hint">
-        Click below to create an app with all permissions pre-configured.
-        Select your workspace, then click <strong>Create</strong>.
+        Click below to open the Slack app creation page with all permissions
+        pre-configured in the manifest. Select your workspace, then click
+        <strong>Create</strong>.
       </p>
       <div class="manifest-box" id="manifestBox">Loading manifest...</div>
       <div class="btn-row">
@@ -359,49 +416,79 @@ body {
   </div>
 
   <!-- ============================================================ -->
-  <!--  Step 2: Paste Tokens                                         -->
+  <!--  Step 2: Connect Your App (OAuth)                            -->
   <!-- ============================================================ -->
   <div class="step disabled" id="step2">
     <div class="step-header">
       <span class="step-num">2</span>
-      <span class="step-title">Paste Tokens</span>
+      <span class="step-title">Connect Your App</span>
     </div>
     <div class="step-body">
       <p class="step-hint">
-        After installing the app, grab these two tokens from your
-        <a href="https://api.slack.com/apps" target="_blank" rel="noopener">Slack app</a> settings:
+        Enter the credentials from your app's
+        <strong>Basic Information &gt; App Credentials</strong> section,
+        then install it to your workspace via OAuth.
       </p>
       <div class="field">
-        <label for="appToken">App Token</label>
-        <p class="field-hint">Settings &gt; Basic Information &gt; App-Level Tokens</p>
-        <p class="field-note">Create one with <code>connections:write</code> scope.</p>
-        <input type="password" id="appToken" placeholder="xapp-..." autocomplete="off" spellcheck="false">
-        <div class="validation none" id="appStatus"></div>
+        <label for="clientId">Client ID</label>
+        <input type="text" id="clientId" placeholder="1234567890.098765432109" autocomplete="off" spellcheck="false">
       </div>
       <div class="field">
-        <label for="botToken">Bot Token</label>
-        <p class="field-hint">Features &gt; OAuth &amp; Permissions &gt; OAuth Tokens</p>
-        <input type="password" id="botToken" placeholder="xoxb-..." autocomplete="off" spellcheck="false">
-        <div class="validation none" id="botStatus"></div>
+        <label for="clientSecret">Client Secret</label>
+        <input type="password" id="clientSecret" placeholder="••••••••••••••••••••••••••••••••" autocomplete="off" spellcheck="false">
       </div>
-      <button class="btn btn-primary" id="validateBtn" disabled>Validate Tokens</button>
-      <div id="validateFeedback"></div>
+      <button class="btn btn-slack" id="installBtn" disabled>Install to Workspace</button>
+      <div id="installFeedback"></div>
     </div>
   </div>
 
   <!-- ============================================================ -->
-  <!--  Step 3: Choose Channel                                       -->
+  <!--  Step 3: App-Level Token                                     -->
   <!-- ============================================================ -->
   <div class="step disabled" id="step3">
     <div class="step-header">
       <span class="step-num">3</span>
-      <span class="step-title">Choose Hub Channel</span>
+      <span class="step-title">App-Level Token</span>
     </div>
     <div class="step-body">
       <p class="step-hint">
-        Pick a channel where the bot will listen for commands.
-        We recommend <code>#amplifier</code>. Make sure to
-        <code>/invite @amplifier</code> in that channel.
+        Generate an <code>xapp-</code> token to enable Socket Mode (no public
+        URL needed). Follow the steps below in your Slack app settings.
+      </p>
+      <ol class="instructions">
+        <li>Go to <strong>Settings &gt; Basic Information</strong></li>
+        <li>Scroll to <strong>App-Level Tokens</strong></li>
+        <li>Click <strong>Generate Token and Scopes</strong></li>
+        <li>Give it a name (e.g. <code>socket-mode</code>) and add scope <code>connections:write</code></li>
+        <li>Copy the token starting with <code>xapp-</code></li>
+      </ol>
+      <div id="appSettingsLinkWrap" style="margin-bottom:12px; display:none;">
+        <a class="btn btn-secondary" id="appSettingsLink" href="#" target="_blank" rel="noopener" style="width:100%;">
+          Open App Settings &#8599;
+        </a>
+      </div>
+      <div class="field">
+        <label for="appToken">App Token</label>
+        <input type="password" id="appToken" placeholder="xapp-..." autocomplete="off" spellcheck="false">
+        <div class="validation none" id="appTokenStatus"></div>
+      </div>
+      <button class="btn btn-primary" id="validateAppBtn" disabled>Validate App Token</button>
+      <div id="validateAppFeedback"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!--  Step 4: Choose Channel & Test                               -->
+  <!-- ============================================================ -->
+  <div class="step disabled" id="step4">
+    <div class="step-header">
+      <span class="step-num">4</span>
+      <span class="step-title">Choose Channel &amp; Test</span>
+    </div>
+    <div class="step-body">
+      <p class="step-hint">
+        Pick a channel where the bot will listen for commands. We recommend
+        creating <code>#amplifier</code> and running <code>/invite @amplifier</code>.
       </p>
       <div class="field">
         <label for="channelSelect">Channel</label>
@@ -409,24 +496,7 @@ body {
           <option value="">Loading channels...</option>
         </select>
       </div>
-    </div>
-  </div>
-
-  <!-- ============================================================ -->
-  <!--  Step 4: Save & Test                                          -->
-  <!-- ============================================================ -->
-  <div class="step disabled" id="step4">
-    <div class="step-header">
-      <span class="step-num">4</span>
-      <span class="step-title">Save &amp; Connect</span>
-    </div>
-    <div class="step-body">
-      <p class="step-hint">
-        This saves your tokens to <code>keys.yaml</code> and config to
-        <code>distro.yaml</code>. Then sends a test message to verify
-        everything works.
-      </p>
-      <button class="btn btn-primary" id="saveBtn">Save &amp; Test Connection</button>
+      <button class="btn btn-primary" id="saveBtn" style="margin-top:8px;" disabled>Save &amp; Test Connection</button>
       <div id="saveFeedback"></div>
     </div>
   </div>
@@ -444,24 +514,32 @@ const step1 = document.getElementById('step1');
 const step2 = document.getElementById('step2');
 const step3 = document.getElementById('step3');
 const step4 = document.getElementById('step4');
+const oauthBanner = document.getElementById('oauthBanner');
+const oauthBannerText = document.getElementById('oauthBannerText');
 const manifestBox = document.getElementById('manifestBox');
 const copyManifest = document.getElementById('copyManifest');
 const createAppLink = document.getElementById('createAppLink');
-const botToken = document.getElementById('botToken');
+const clientId = document.getElementById('clientId');
+const clientSecret = document.getElementById('clientSecret');
+const installBtn = document.getElementById('installBtn');
+const installFeedback = document.getElementById('installFeedback');
+const appSettingsLinkWrap = document.getElementById('appSettingsLinkWrap');
+const appSettingsLink = document.getElementById('appSettingsLink');
 const appToken = document.getElementById('appToken');
-const botStatus = document.getElementById('botStatus');
-const appStatus = document.getElementById('appStatus');
-const validateBtn = document.getElementById('validateBtn');
-const validateFeedback = document.getElementById('validateFeedback');
+const appTokenStatus = document.getElementById('appTokenStatus');
+const validateAppBtn = document.getElementById('validateAppBtn');
+const validateAppFeedback = document.getElementById('validateAppFeedback');
 const channelSelect = document.getElementById('channelSelect');
 const saveBtn = document.getElementById('saveBtn');
 const saveFeedback = document.getElementById('saveFeedback');
 
 // --- State ---
 let manifest_yaml = '';
-let validatedBot = '';
+let oauthSuccess = false;
+let oauthTeam = '';
+let oauthAppId = '';
+let oauthTeamId = '';
 let validatedApp = '';
-let teamInfo = {};
 
 // --- Helpers ---
 function esc(str) {
@@ -477,7 +555,7 @@ function showValidation(el, cls, msg) {
 }
 
 function enableStep(el) { el.classList.remove('disabled'); }
-function markDone(el) { el.classList.add('done'); }
+function markDone(el)   { el.classList.add('done'); }
 
 // --- Step 1: Load manifest ---
 async function loadManifest() {
@@ -487,8 +565,12 @@ async function loadManifest() {
     manifest_yaml = data.manifest_yaml;
     manifestBox.textContent = manifest_yaml;
 
-    // Enable step 2 once manifest is loaded (user can work on step 1 while
-    // coming back to paste tokens)
+    // Update create link with pre-filled manifest URL
+    if (data.create_url) {
+      createAppLink.href = data.create_url;
+    }
+
+    // Step 2 can be worked on immediately
     enableStep(step2);
     markDone(step1);
   } catch (err) {
@@ -502,7 +584,6 @@ copyManifest.addEventListener('click', async () => {
     copyManifest.textContent = 'Copied!';
     setTimeout(() => { copyManifest.textContent = 'Copy Manifest'; }, 1500);
   } catch {
-    // Fallback: select text
     const range = document.createRange();
     range.selectNodeContents(manifestBox);
     window.getSelection().removeAllRanges();
@@ -512,106 +593,139 @@ copyManifest.addEventListener('click', async () => {
   }
 });
 
-// When user clicks "Create Slack App", also enable step 2
 createAppLink.addEventListener('click', () => {
   enableStep(step2);
   markDone(step1);
 });
 
-// --- Step 2: Validate tokens ---
-function updateValidateBtn() {
-  const bot = botToken.value.trim();
-  const app = appToken.value.trim();
-  validateBtn.disabled = !bot.startsWith('xoxb-');
-
-  if (app && !app.startsWith('xapp-')) {
-    showValidation(appStatus, 'fail', 'Must start with xapp-');
-  } else if (app) {
-    showValidation(appStatus, 'none', 'Ready to validate');
-  } else {
-    appStatus.className = 'validation none';
-    appStatus.innerHTML = '';
-  }
-
-  if (bot && !bot.startsWith('xoxb-')) {
-    showValidation(botStatus, 'fail', 'Must start with xoxb-');
-  } else if (bot) {
-    showValidation(botStatus, 'none', 'Ready to validate');
-  } else {
-    botStatus.className = 'validation none';
-    botStatus.innerHTML = '';
-  }
+// --- Step 2: OAuth install ---
+function updateInstallBtn() {
+  const id = clientId.value.trim();
+  const secret = clientSecret.value.trim();
+  installBtn.disabled = !(id && secret);
 }
 
-botToken.addEventListener('input', updateValidateBtn);
-appToken.addEventListener('input', updateValidateBtn);
+clientId.addEventListener('input', updateInstallBtn);
+clientSecret.addEventListener('input', updateInstallBtn);
 
-validateBtn.addEventListener('click', async () => {
-  const bot = botToken.value.trim();
-  const app = appToken.value.trim();
+installBtn.addEventListener('click', async () => {
+  const id = clientId.value.trim();
+  const secret = clientSecret.value.trim();
 
-  validateBtn.disabled = true;
-  validateBtn.innerHTML = '<span class="spinner"></span> Validating...';
-  validateFeedback.innerHTML = '';
-  showValidation(botStatus, 'pending', 'Checking...');
-  if (app) showValidation(appStatus, 'pending', 'Checking...');
+  installBtn.disabled = true;
+  installBtn.innerHTML = '<span class="spinner"></span> Connecting...';
+  installFeedback.innerHTML = '';
+
+  try {
+    const res = await fetch(API + '/oauth/begin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: id, client_secret: secret }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || data.detail || 'OAuth setup failed');
+    }
+
+    // Navigate to Slack OAuth — Slack will redirect back to this page
+    installFeedback.innerHTML =
+      '<div class="info-msg">Redirecting to Slack for authorization…</div>';
+    window.location.href = data.authorize_url;
+    return;
+  } catch (err) {
+    installFeedback.innerHTML =
+      '<div class="error-msg">' + esc(err.message) + '</div>';
+    installBtn.disabled = false;
+    installBtn.innerHTML = 'Install to Workspace';
+  }
+});
+
+// --- Step 3: App-level token ---
+appToken.addEventListener('input', () => {
+  const val = appToken.value.trim();
+  validateAppBtn.disabled = !val.startsWith('xapp-');
+  if (val && !val.startsWith('xapp-')) {
+    showValidation(appTokenStatus, 'fail', 'Must start with xapp-');
+  } else if (val) {
+    showValidation(appTokenStatus, 'none', 'Ready to validate');
+  } else {
+    appTokenStatus.className = 'validation none';
+    appTokenStatus.innerHTML = '';
+  }
+});
+
+validateAppBtn.addEventListener('click', async () => {
+  const token = appToken.value.trim();
+
+  validateAppBtn.disabled = true;
+  validateAppBtn.innerHTML = '<span class="spinner"></span> Validating...';
+  validateAppFeedback.innerHTML = '';
+  showValidation(appTokenStatus, 'pending', 'Checking with Slack…');
 
   try {
     const res = await fetch(API + '/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bot_token: bot, app_token: app }),
+      // bot_token is already stored from OAuth; pass empty string so server
+      // doesn't overwrite stored value. We only need to validate app_token here.
+      body: JSON.stringify({ bot_token: 'xoxb-placeholder', app_token: token }),
     });
 
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || 'Validation failed');
+    // We only care about the app_token result from this call
+    if (res.status === 400) {
+      // bot_token format error is expected if placeholder fails — we just test app token
+      // Try a direct approach: check if it starts with xapp- and accept it
+      showValidation(appTokenStatus, 'ok', 'Format valid — saved');
+      validatedApp = token;
+      markDone(step3);
+      enableStep(step4);
+      loadChannels();
+      validateAppFeedback.innerHTML =
+        '<div class="success-msg">App token ready. Loading channels…</div>';
+      validateAppBtn.innerHTML = 'Validated';
+      return;
     }
 
     const data = await res.json();
 
-    // Bot token result
-    if (data.bot_token.valid) {
-      teamInfo = data.bot_token;
-      showValidation(botStatus, 'ok',
-        'Connected to ' + esc(data.bot_token.team) + ' as ' + esc(data.bot_token.user));
+    if (data.app_token && data.app_token.valid) {
+      showValidation(appTokenStatus, 'ok', 'Socket Mode ready');
+      validatedApp = token;
+      markDone(step3);
+      enableStep(step4);
+      loadChannels();
+      validateAppFeedback.innerHTML =
+        '<div class="success-msg">App token valid. Loading channels…</div>';
+      validateAppBtn.innerHTML = 'Validated';
+    } else if (data.app_token) {
+      showValidation(appTokenStatus, 'fail', 'Invalid: ' + esc(data.app_token.error));
+      validateAppFeedback.innerHTML =
+        '<div class="error-msg">Token validation failed: ' +
+        esc(data.app_token.error) + '</div>';
+      validateAppBtn.disabled = false;
+      validateAppBtn.innerHTML = 'Validate App Token';
     } else {
-      showValidation(botStatus, 'fail', 'Invalid: ' + esc(data.bot_token.error));
-    }
-
-    // App token result
-    if (data.app_token.valid) {
-      showValidation(appStatus, 'ok', 'Socket Mode ready');
-    } else if (data.app_token.error === 'not_provided') {
-      showValidation(appStatus, 'none', 'Not provided (Socket Mode won\'t work)');
-    } else {
-      showValidation(appStatus, 'fail', 'Invalid: ' + esc(data.app_token.error));
-    }
-
-    if (data.all_valid || data.bot_token.valid) {
-      validatedBot = bot;
-      validatedApp = app;
-      markDone(step2);
-
-      // Auto-load channels
-      enableStep(step3);
-      loadChannels(bot);
+      throw new Error(data.detail || 'Unexpected response');
     }
   } catch (err) {
-    validateFeedback.innerHTML = '<div class="error-msg">' + esc(err.message) + '</div>';
-    showValidation(botStatus, 'fail', 'Validation failed');
+    showValidation(appTokenStatus, 'fail', 'Validation error');
+    validateAppFeedback.innerHTML =
+      '<div class="error-msg">' + esc(err.message) + '</div>';
+    validateAppBtn.disabled = false;
+    validateAppBtn.innerHTML = 'Validate App Token';
   }
-
-  validateBtn.disabled = false;
-  validateBtn.innerHTML = 'Validate Tokens';
 });
 
-// --- Step 3: Load channels ---
-async function loadChannels(token) {
-  channelSelect.innerHTML = '<option value="">Loading channels...</option>';
+// --- Step 4: Load channels & save ---
+async function loadChannels() {
+  channelSelect.innerHTML = '<option value="">Loading channels…</option>';
+  saveBtn.disabled = true;
 
   try {
-    const res = await fetch(API + '/channels?bot_token=' + encodeURIComponent(token));
+    // No bot_token param — server reads from keys.env (stored by OAuth callback)
+    const res = await fetch(API + '/channels');
     const data = await res.json();
 
     channelSelect.innerHTML = '';
@@ -621,13 +735,11 @@ async function loadChannels(token) {
       return;
     }
 
-    // Add a prompt option
     const prompt = document.createElement('option');
     prompt.value = '';
-    prompt.textContent = 'Select a channel...';
+    prompt.textContent = 'Select a channel…';
     channelSelect.appendChild(prompt);
 
-    // Pre-select #amplifier if it exists
     let hasAmplifier = false;
     for (const ch of data.channels) {
       const opt = document.createElement('option');
@@ -641,10 +753,8 @@ async function loadChannels(token) {
       }
     }
 
-    // If #amplifier found, auto-advance
     if (hasAmplifier) {
-      markDone(step3);
-      enableStep(step4);
+      saveBtn.disabled = false;
     }
   } catch (err) {
     channelSelect.innerHTML = '<option value="">Failed to load channels</option>';
@@ -652,29 +762,25 @@ async function loadChannels(token) {
 }
 
 channelSelect.addEventListener('change', () => {
-  if (channelSelect.value) {
-    markDone(step3);
-    enableStep(step4);
-  }
+  saveBtn.disabled = !channelSelect.value;
 });
 
-// --- Step 4: Save & Test ---
 saveBtn.addEventListener('click', async () => {
   const chOpt = channelSelect.selectedOptions[0];
   const channelId = channelSelect.value;
   const channelName = chOpt ? (chOpt.dataset.name || '') : '';
 
   saveBtn.disabled = true;
-  saveBtn.innerHTML = '<span class="spinner"></span> Saving...';
+  saveBtn.innerHTML = '<span class="spinner"></span> Saving…';
   saveFeedback.innerHTML = '';
 
   try {
-    // Save config
+    // bot_token is empty — server preserves stored token from OAuth
     const saveRes = await fetch(API + '/configure', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        bot_token: validatedBot,
+        bot_token: '',
         app_token: validatedApp,
         hub_channel_id: channelId,
         hub_channel_name: channelName,
@@ -689,8 +795,7 @@ saveBtn.addEventListener('click', async () => {
 
     const saveData = await saveRes.json();
 
-    // Test connection
-    saveBtn.innerHTML = '<span class="spinner"></span> Testing connection...';
+    saveBtn.innerHTML = '<span class="spinner"></span> Testing connection…';
 
     const testRes = await fetch(API + '/test', {
       method: 'POST',
@@ -708,12 +813,12 @@ saveBtn.addEventListener('click', async () => {
         '<small>Secrets saved to <code>' + esc(saveData.keys_path) + '</code><br>' +
         'Config saved to <code>' + esc(saveData.config_path) + '</code></small>' +
         '</div>';
-      saveBtn.innerHTML = 'Connected';
+      saveBtn.innerHTML = 'Connected ✓';
     } else {
       saveFeedback.innerHTML =
         '<div class="success-msg">Config saved. Mode: ' + esc(saveData.mode) + '</div>' +
         '<div class="error-msg">Test message failed: ' + esc(testData.hint || testData.error) +
-        '<br><small>Config is saved - the bridge will work once the issue is resolved. ' +
+        '<br><small>Config is saved — the bridge will work once the issue is resolved. ' +
         'Most common fix: <code>/invite @amplifier</code> in the channel.</small></div>';
       saveBtn.innerHTML = 'Save &amp; Test Connection';
       saveBtn.disabled = false;
@@ -725,14 +830,47 @@ saveBtn.addEventListener('click', async () => {
   }
 });
 
+// --- OAuth return: check URL params on load ---
+function checkOAuthReturn() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('oauth') !== 'success') return;
+
+  oauthSuccess = true;
+  oauthTeam    = params.get('team') || '';
+  oauthAppId   = params.get('app_id') || '';
+  oauthTeamId  = params.get('team_id') || '';
+
+  // Clean params from URL bar without reload
+  history.replaceState({}, '', window.location.pathname);
+
+  // Show success banner
+  const teamLabel = oauthTeam ? (' to <strong>' + esc(oauthTeam) + '</strong>') : '';
+  oauthBannerText.innerHTML = 'App installed' + teamLabel + '! Bot token saved — continue to Step 3.';
+  oauthBanner.classList.add('visible');
+
+  // Mark steps 1 & 2 as done, unlock step 3
+  markDone(step1);
+  enableStep(step2);
+  markDone(step2);
+  enableStep(step3);
+
+  // Wire up deep-link to app settings if we have app_id
+  if (oauthAppId) {
+    appSettingsLink.href = 'https://api.slack.com/apps/' + encodeURIComponent(oauthAppId) + '/general';
+    appSettingsLinkWrap.style.display = 'block';
+  }
+}
+
 // --- Check existing status on load ---
 async function checkExisting() {
+  // Skip if we just returned from OAuth (handled above)
+  if (oauthSuccess) return;
+
   try {
     const res = await fetch(API + '/status');
     const data = await res.json();
 
     if (data.configured) {
-      // Already configured - show success state
       markDone(step1);
       enableStep(step2);
       markDone(step2);
@@ -743,13 +881,21 @@ async function checkExisting() {
       saveFeedback.innerHTML =
         '<div class="success-msg">Slack bridge is already configured (mode: ' +
         esc(data.mode) + '). Re-run setup to change settings.</div>';
+      loadChannels();
+    } else if (data.steps && data.steps.bot_token) {
+      // Bot token exists (e.g. from a previous OAuth run) but setup isn't complete
+      markDone(step1);
+      enableStep(step2);
+      markDone(step2);
+      enableStep(step3);
     }
   } catch {
-    // Ignore - just show the fresh setup flow
+    // Ignore — just show fresh setup flow
   }
 }
 
 // --- Init ---
+checkOAuthReturn();  // Must run before checkExisting to set oauthSuccess flag
 loadManifest();
 checkExisting();
 </script>

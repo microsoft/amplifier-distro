@@ -21,14 +21,19 @@ The setup flow:
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
+import secrets
+import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlencode
 
 import httpx
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -42,6 +47,11 @@ _PLUGIN_CONFIG_DIR = "plugins/slack"
 _PLUGIN_CONFIG_FILE = "config.yaml"
 
 # --- The Slack App Manifest (for one-click app creation) ---
+
+_oauth_states: dict[str, float] = {}  # state_token -> expiry timestamp
+_oauth_pending: dict[
+    str, dict
+] = {}  # state_token -> {client_id, client_secret, redirect_uri}
 
 SLACK_APP_MANIFEST = {
     "display_information": {
@@ -101,6 +111,11 @@ class ValidateRequest(BaseModel):
     app_token: str = ""
 
 
+class OAuthBeginRequest(BaseModel):
+    client_id: str
+    client_secret: str
+
+
 class ConfigureRequest(BaseModel):
     bot_token: str
     app_token: str = ""
@@ -108,6 +123,8 @@ class ConfigureRequest(BaseModel):
     hub_channel_id: str = ""
     hub_channel_name: str = "amplifier"
     socket_mode: bool = True
+    client_id: str = ""
+    client_secret: str = ""
 
 
 class TestRequest(BaseModel):
@@ -270,6 +287,69 @@ async def _list_channels(token: str, *, limit: int = 200) -> list[dict[str, Any]
     ]
 
 
+# --- OAuth helpers ---
+
+
+def _create_oauth_state() -> str:
+    """Create a CSRF state token with 10-minute TTL, pruning expired entries."""
+    now = time.time()
+    expired = [k for k, v in _oauth_states.items() if v < now]
+    for k in expired:
+        _oauth_states.pop(k, None)
+        _oauth_pending.pop(k, None)
+
+    state = secrets.token_urlsafe(32)
+    _oauth_states[state] = now + 600  # 10 minutes
+    return state
+
+
+def _validate_oauth_state(state: str) -> bool:
+    """Validate and consume a CSRF state token. Returns False if missing/expired."""
+    expiry = _oauth_states.pop(state, None)
+    if expiry is None:
+        return False
+    return time.time() < expiry
+
+
+def _error_page(message: str) -> HTMLResponse:
+    """Return a styled HTML error page for OAuth failures."""
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setup Error — Amplifier Slack</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<script src="/static/theme-init.js"></script>
+<link rel="stylesheet" href="/static/amplifier-theme.css">
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ display: flex; align-items: center; justify-content: center;
+          min-height: 100vh; font-family: var(--font-body);
+          background: var(--canvas); color: var(--ink); padding: 20px; }}
+  .card {{ background: var(--canvas-warm); border: 1px solid var(--canvas-mist);
+           border-radius: var(--radius-card); padding: 48px 40px;
+           max-width: 480px; width: 100%; box-shadow: var(--shadow-lift);
+           text-align: center; }}
+  h2 {{ font-size: 20px; font-weight: 700; color: var(--error); margin-bottom: 16px; }}
+  p {{ color: var(--ink-slate); margin-bottom: 28px; font-size: 15px; line-height: 1.6; }}
+  a {{ display: inline-flex; align-items: center; gap: 6px; color: var(--signal);
+       text-decoration: none; font-weight: 600; font-size: 14px; }}
+  a:hover {{ text-decoration: underline; }}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 class="wordmark wordmark-sm">amplifier</h1>
+  <h2 style="margin-top:16px;">Setup Error</h2>
+  <p>{message}</p>
+  <a href="/slack/setup-ui">&#8592; Back to Setup</a>
+</div>
+</body>
+</html>"""
+    return HTMLResponse(content=html, status_code=400)
+
+
 # --- Routes ---
 
 
@@ -281,9 +361,15 @@ async def setup_status() -> dict[str, Any]:
 
     bot_token = os.environ.get("SLACK_BOT_TOKEN", "") or keys.get("SLACK_BOT_TOKEN", "")
     app_token = os.environ.get("SLACK_APP_TOKEN", "") or keys.get("SLACK_APP_TOKEN", "")
-    hub_channel_id = os.environ.get("SLACK_HUB_CHANNEL_ID", "") or cfg.get("hub_channel_id", "")
+    hub_channel_id = os.environ.get("SLACK_HUB_CHANNEL_ID", "") or cfg.get(
+        "hub_channel_id", ""
+    )
     sm_env = os.environ.get("SLACK_SOCKET_MODE", "")
-    socket_mode = sm_env.lower() in ("1", "true", "yes") if sm_env else cfg.get("socket_mode", False)
+    socket_mode = (
+        sm_env.lower() in ("1", "true", "yes")
+        if sm_env
+        else cfg.get("socket_mode", False)
+    )
 
     steps = {
         "bot_token": bool(bot_token),
@@ -381,6 +467,8 @@ async def configure(req: ConfigureRequest) -> dict[str, Any]:
             "SLACK_BOT_TOKEN": req.bot_token,
             "SLACK_APP_TOKEN": req.app_token,
             "SLACK_SIGNING_SECRET": req.signing_secret,
+            "SLACK_CLIENT_ID": req.client_id,
+            "SLACK_CLIENT_SECRET": req.client_secret,
         }
     )
 
@@ -462,25 +550,113 @@ async def test_connection(req: TestRequest) -> dict[str, Any]:
 
 
 @router.get("/manifest")
-async def get_manifest() -> dict[str, Any]:
-    """Return the Slack App Manifest for one-click app creation."""
-    manifest_yaml = yaml.dump(
-        SLACK_APP_MANIFEST, default_flow_style=False, sort_keys=False
+async def get_manifest(request: Request) -> dict[str, Any]:
+    """Return the Slack App Manifest with a dynamic redirect_url injected."""
+    manifest = copy.deepcopy(SLACK_APP_MANIFEST)
+    base = str(request.base_url).rstrip("/")
+    callback = f"{base}/slack/setup/oauth/callback"
+    manifest["oauth_config"]["redirect_urls"] = [callback]
+
+    manifest_yaml = yaml.dump(manifest, default_flow_style=False, sort_keys=False)
+    create_url = "https://api.slack.com/apps?new_app=1&manifest_yaml=" + quote(
+        manifest_yaml
     )
+
     return {
-        "manifest": SLACK_APP_MANIFEST,
+        "manifest": manifest,
         "manifest_yaml": manifest_yaml,
-        "instructions": (
-            "1. Go to https://api.slack.com/apps\n"
-            "2. Click 'Create New App' > 'From a manifest'\n"
-            "3. Select your workspace\n"
-            "4. Choose YAML format and paste the manifest\n"
-            "5. Click 'Create'\n"
-            "6. Go to 'Install App' and install to your workspace\n"
-            "7. Copy the Bot Token (xoxb-...) from OAuth & Permissions\n"
-            "8. Copy the App Token (xapp-...) from Basic Information\n"
-            "   > App-Level Tokens (create one with 'connections:write')\n"
-            "9. Use /setup/configure to save both tokens"
-        ),
-        "create_url": "https://api.slack.com/apps?new_app=1",
+        "create_url": create_url,
     }
+
+
+@router.post("/oauth/begin")
+async def oauth_begin(req: OAuthBeginRequest, request: Request) -> JSONResponse:
+    """Start the OAuth install flow — returns a Slack authorize URL.
+
+    Enforces HTTPS because Slack only allows HTTPS redirect URIs.
+    """
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    if scheme != "https":
+        return JSONResponse(
+            {
+                "error": (
+                    "OAuth requires HTTPS. Restart with: amp-distro serve --tls auto"
+                )
+            },
+            status_code=400,
+        )
+
+    state = _create_oauth_state()
+    base = str(request.base_url).rstrip("/")
+    redirect_uri = f"{base}/slack/setup/oauth/callback"
+    _oauth_pending[state] = {
+        "client_id": req.client_id,
+        "client_secret": req.client_secret,
+        "redirect_uri": redirect_uri,
+    }
+
+    scopes = ",".join(SLACK_APP_MANIFEST["oauth_config"]["scopes"]["bot"])
+    auth_url = (
+        f"https://slack.com/oauth/v2/authorize"
+        f"?client_id={req.client_id}"
+        f"&scope={scopes}"
+        f"&redirect_uri={redirect_uri}"
+        f"&state={state}"
+    )
+    return JSONResponse({"authorize_url": auth_url})
+
+
+@router.get("/oauth/callback")
+async def oauth_callback(
+    request: Request,
+    code: str = "",
+    state: str = "",
+    error: str = "",
+) -> HTMLResponse | RedirectResponse:
+    """Handle Slack's OAuth redirect — exchange code for bot token."""
+    if error:
+        return _error_page(f"Slack returned an error: {error}")
+
+    if not _validate_oauth_state(state):
+        return _error_page("Invalid or expired state. Please try again.")
+
+    pending = _oauth_pending.pop(state, None)
+    if not pending:
+        return _error_page("Session expired. Please restart the OAuth flow.")
+
+    # Exchange authorization code for bot token
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://slack.com/api/oauth.v2.access",
+            data={
+                "client_id": pending["client_id"],
+                "client_secret": pending["client_secret"],
+                "code": code,
+                "redirect_uri": pending["redirect_uri"],
+            },
+            timeout=15.0,
+        )
+        data = resp.json()
+
+    if not data.get("ok"):
+        return _error_page(f"Token exchange failed: {data.get('error', 'unknown')}")
+
+    bot_token = data.get("access_token", "")
+    team_name = data.get("team", {}).get("name", "")
+    app_id = data.get("app_id", "")
+    team_id = data.get("team", {}).get("id", "")
+
+    # Persist bot token and client credentials to keys.env
+    _save_keys(
+        {
+            "SLACK_BOT_TOKEN": bot_token,
+            "SLACK_CLIENT_ID": pending["client_id"],
+            "SLACK_CLIENT_SECRET": pending["client_secret"],
+        }
+    )
+    os.environ["SLACK_BOT_TOKEN"] = bot_token
+
+    params = urlencode(
+        {"oauth": "success", "team": team_name, "app_id": app_id, "team_id": team_id}
+    )
+    return RedirectResponse(f"/slack/setup-ui?{params}")
