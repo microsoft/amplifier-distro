@@ -327,6 +327,96 @@ body {
 }
 
 .footer a:hover { text-decoration: underline; }
+
+/* ------------------------------------------------------------------ */
+/*  Setup Mode Choice                                                  */
+/* ------------------------------------------------------------------ */
+.setup-choice {
+  margin-bottom: 28px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--canvas-mist);
+}
+
+.setup-choice h2 {
+  font-size: 17px;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.choice-cards {
+  display: flex;
+  gap: 12px;
+}
+
+.choice-card {
+  flex: 1;
+  padding: 18px;
+  border: 1px solid var(--canvas-mist);
+  border-radius: var(--radius-card);
+  background: var(--canvas-stone);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-body);
+  transition: border-color var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+}
+
+.choice-card:hover {
+  border-color: var(--signal);
+  background: var(--canvas);
+}
+
+.choice-card h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.choice-card p {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--ink-slate);
+}
+
+.choice-card small {
+  font-size: 12px;
+  color: var(--ink-fog);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Automation Progress Panel                                          */
+/* ------------------------------------------------------------------ */
+.automation-panel {
+  margin-bottom: 28px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--canvas-mist);
+}
+
+.automation-panel h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.automation-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--canvas-stone);
+  border: 1px solid var(--canvas-mist);
+  border-radius: var(--radius-input);
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.automation-progress .spinner {
+  flex-shrink: 0;
+  border-color: rgba(128,128,128,0.25);
+  border-top-color: var(--signal);
+}
 </style>
 </head>
 <body>
@@ -334,6 +424,41 @@ body {
   <h1 class="wordmark wordmark-sm">amplifier</h1>
   <p style="color: var(--ink-slate); font-size: 1.1rem; margin-top: 8px; text-align: center;">Connect Slack</p>
   <p class="tagline">Bridge your Slack workspace to Amplifier</p>
+
+  <!-- ============================================================ -->
+  <!--  Setup Mode Choice                                           -->
+  <!-- ============================================================ -->
+  <div id="setup-mode-choice" class="setup-choice">
+    <h2>How would you like to set up Slack?</h2>
+    <div class="choice-cards">
+      <button onclick="startAutomatedSetup()" class="choice-card">
+        <h3>⚡ Automated Setup</h3>
+        <p>~2 minutes. Browser automation handles most steps.</p>
+        <small>Requires: agent-browser installed</small>
+      </button>
+      <button onclick="startManualSetup()" class="choice-card">
+        <h3>📋 Manual Setup</h3>
+        <p>~5–10 minutes. Step-by-step guided instructions.</p>
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!--  Automation Progress Panel (hidden by default)              -->
+  <!-- ============================================================ -->
+  <div id="automation-panel" class="automation-panel" style="display:none">
+    <h2>Automated Setup</h2>
+    <div id="automation-progress" class="automation-progress" style="display:none">
+      <span class="spinner"></span>
+      <span id="automation-status">Starting...</span>
+    </div>
+    <div id="automation-feedback"></div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!--  Manual Wizard (hidden by default)                          -->
+  <!-- ============================================================ -->
+  <div id="manual-wizard" style="display:none">
 
   <!-- ============================================================ -->
   <!--  Step 1: Create App                                           -->
@@ -430,6 +555,8 @@ body {
       <div id="saveFeedback"></div>
     </div>
   </div>
+
+  </div><!-- /#manual-wizard -->
 
   <div class="footer">
     <a href="/distro/settings">Back to settings</a>
@@ -732,7 +859,9 @@ async function checkExisting() {
     const data = await res.json();
 
     if (data.configured) {
-      // Already configured - show success state
+      // Already configured — skip choice, show the wizard in all-done state
+      document.getElementById('setup-mode-choice').style.display = 'none';
+      document.getElementById('manual-wizard').style.display = 'block';
       markDone(step1);
       enableStep(step2);
       markDone(step2);
@@ -745,7 +874,99 @@ async function checkExisting() {
         esc(data.mode) + '). Re-run setup to change settings.</div>';
     }
   } catch {
-    // Ignore - just show the fresh setup flow
+    // Ignore — just show the fresh setup flow
+  }
+}
+
+// --- Two-path setup ---
+
+function startManualSetup() {
+  document.getElementById('setup-mode-choice').style.display = 'none';
+  document.getElementById('manual-wizard').style.display = 'block';
+}
+
+function switchToManual(e) {
+  if (e) e.preventDefault();
+  document.getElementById('automation-panel').style.display = 'none';
+  document.getElementById('manual-wizard').style.display = 'block';
+}
+
+async function startAutomatedSetup() {
+  document.getElementById('setup-mode-choice').style.display = 'none';
+  const panel = document.getElementById('automation-panel');
+  panel.style.display = 'block';
+
+  const progressEl = document.getElementById('automation-progress');
+  const statusEl   = document.getElementById('automation-status');
+  const feedbackEl = document.getElementById('automation-feedback');
+
+  progressEl.style.display = 'flex';
+  statusEl.textContent = 'Starting automation…';
+
+  // Listen for SSE progress stream (best-effort)
+  let es = null;
+  try {
+    es = new EventSource(API + '/automate/status');
+    es.addEventListener('progress', (e) => {
+      try {
+        const s = JSON.parse(e.data);
+        const label = s.step  ? '<strong>' + esc(s.step) + '</strong>: ' : '';
+        statusEl.innerHTML = label + esc(s.detail || '');
+        if (s.complete) { es.close(); es = null; }
+      } catch { /* ignore parse errors */ }
+    });
+    es.onerror = () => { if (es) { es.close(); es = null; } };
+  } catch { /* SSE not supported */ }
+
+  // Kick off the automation POST
+  try {
+    const res = await fetch(API + '/automate', { method: 'POST' });
+    if (es) { es.close(); es = null; }
+
+    progressEl.style.display = 'none';
+    const data = await res.json();
+
+    if (data.success) {
+      feedbackEl.innerHTML =
+        '<div class="success-msg">' +
+        '✓ Slack app created and tokens saved!<br>' +
+        '<a href="#" onclick="location.reload();return false;">Reload to configure your hub channel →</a>' +
+        '</div>';
+    } else if (res.status === 424) {
+      // agent-browser missing
+      feedbackEl.innerHTML =
+        '<div class="error-msg">agent-browser is not installed.<br>' +
+        '<code>' + esc(data.install_cmd || '') + '</code></div>' +
+        '<p style="margin-top:12px;font-size:13px;text-align:center">' +
+        '<a href="#" onclick="switchToManual(event)">Switch to Manual Setup →</a></p>';
+    } else {
+      // Partial failure
+      const partial = data.partial_tokens || {};
+      let msg = '<div class="error-msg">Automation stopped at step ' +
+        '<strong>' + esc(data.step_reached || 'unknown') + '</strong>';
+      if (data.error) msg += '<br>' + esc(data.error);
+      msg += '</div>';
+      if (partial.app_token || partial.bot_token) {
+        msg += '<div class="success-msg" style="margin-top:8px">Some tokens were retrieved — ' +
+          'switch to manual setup to enter the missing ones.</div>';
+      }
+      msg += '<p style="margin-top:12px;font-size:13px;text-align:center">' +
+        '<a href="#" onclick="switchToManual(event)">Switch to Manual Setup →</a></p>';
+      feedbackEl.innerHTML = msg;
+
+      // Pre-fill any partial tokens the automation did retrieve
+      if (data.partial_tokens) {
+        if (data.partial_bot_token)  { botToken.value  = data.partial_bot_token;  }
+        if (data.partial_app_token)  { appToken.value  = data.partial_app_token;  }
+      }
+    }
+  } catch (err) {
+    if (es) { es.close(); es = null; }
+    progressEl.style.display = 'none';
+    feedbackEl.innerHTML =
+      '<div class="error-msg">' + esc(err.message) + '</div>' +
+      '<p style="margin-top:12px;font-size:13px;text-align:center">' +
+      '<a href="#" onclick="switchToManual(event)">Switch to Manual Setup →</a></p>';
   }
 }
 

@@ -21,6 +21,8 @@ The setup flow:
 
 from __future__ import annotations
 
+import copy
+import json
 import logging
 import os
 from pathlib import Path
@@ -28,7 +30,8 @@ from typing import Any
 
 import httpx
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -281,9 +284,15 @@ async def setup_status() -> dict[str, Any]:
 
     bot_token = os.environ.get("SLACK_BOT_TOKEN", "") or keys.get("SLACK_BOT_TOKEN", "")
     app_token = os.environ.get("SLACK_APP_TOKEN", "") or keys.get("SLACK_APP_TOKEN", "")
-    hub_channel_id = os.environ.get("SLACK_HUB_CHANNEL_ID", "") or cfg.get("hub_channel_id", "")
+    hub_channel_id = os.environ.get("SLACK_HUB_CHANNEL_ID", "") or cfg.get(
+        "hub_channel_id", ""
+    )
     sm_env = os.environ.get("SLACK_SOCKET_MODE", "")
-    socket_mode = sm_env.lower() in ("1", "true", "yes") if sm_env else cfg.get("socket_mode", False)
+    socket_mode = (
+        sm_env.lower() in ("1", "true", "yes")
+        if sm_env
+        else cfg.get("socket_mode", False)
+    )
 
     steps = {
         "bot_token": bool(bot_token),
@@ -484,3 +493,66 @@ async def get_manifest() -> dict[str, Any]:
         ),
         "create_url": "https://api.slack.com/apps?new_app=1",
     }
+
+
+@router.post("/automate")
+async def automate_setup(request: Request) -> dict[str, Any]:
+    """Launch browser automation to create and configure the Slack app."""
+    from .setup_automation import automate_slack_setup, check_agent_browser
+
+    if not check_agent_browser():
+        return JSONResponse(
+            {
+                "error": "agent-browser not installed",
+                "install_cmd": "npm install -g agent-browser && agent-browser install",
+            },
+            status_code=424,
+        )
+
+    manifest = copy.deepcopy(SLACK_APP_MANIFEST)
+    manifest_yaml_str = yaml.dump(manifest, default_flow_style=False, sort_keys=False)
+    result = await automate_slack_setup(manifest_yaml_str)
+
+    if result.success:
+        _save_keys(
+            {
+                "SLACK_BOT_TOKEN": result.bot_token,
+                "SLACK_APP_TOKEN": result.app_token,
+            }
+        )
+        os.environ["SLACK_BOT_TOKEN"] = result.bot_token
+        os.environ["SLACK_APP_TOKEN"] = result.app_token
+        return {"success": True, "message": "Slack app created and configured!"}
+
+    return {
+        "success": False,
+        "error": result.error,
+        "step_reached": result.step_reached,
+        "partial_tokens": {
+            "bot_token": bool(result.bot_token),
+            "app_token": bool(result.app_token),
+        },
+    }
+
+
+@router.get("/automate/status")
+async def automate_status(request: Request) -> Any:
+    """SSE stream of automation progress; falls back to plain JSON."""
+    from .setup_automation import get_automation_status
+
+    try:
+        from sse_starlette.sse import EventSourceResponse
+
+        async def _generate():
+            while True:
+                status = get_automation_status()
+                yield {"event": "progress", "data": json.dumps(status)}
+                if status.get("complete"):
+                    break
+                import asyncio
+
+                await asyncio.sleep(1)
+
+        return EventSourceResponse(_generate())
+    except ImportError:
+        return get_automation_status()
