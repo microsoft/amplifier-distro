@@ -68,7 +68,7 @@ dependencies = [
 [[package]]
 name = "amplifierd"
 version = "0.1.0"
-source = { git = "https://github.com/microsoft/amplifierd?branch=main#158c2fe3c4214142092bb90216633b018fb8d33e" }
+source = { git = "https://github.com/microsoft/amplifierd?branch=main#d8ae8e28d51aa63dfcac08782e53d0638c45adb6" }
 dependencies = [
     { name = "amplifier-core" },
     { name = "amplifier-foundation" },
