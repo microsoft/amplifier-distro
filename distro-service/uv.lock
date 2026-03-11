@@ -7,9 +7,9 @@ name = "amp-distro"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "amplifier-chat" },
     { name = "amplifierd" },
     { name = "amplifierd-plugin-auth" },
-    { name = "amplifierd-plugin-chat" },
     { name = "amplifierd-plugin-distro" },
     { name = "amplifierd-plugin-slack" },
     { name = "amplifierd-plugin-voice" },
@@ -18,13 +18,24 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "amplifier-chat", git = "https://github.com/microsoft/amplifier-chat?rev=main" },
     { name = "amplifierd", git = "https://github.com/microsoft/amplifierd?branch=main" },
     { name = "amplifierd-plugin-auth", editable = "../amplifierd-plugins/amplifierd-plugin-auth" },
-    { name = "amplifierd-plugin-chat", git = "https://github.com/microsoft/amplifier-chat?rev=main" },
     { name = "amplifierd-plugin-distro", editable = "../amplifierd-plugins/amplifierd-plugin-distro" },
     { name = "amplifierd-plugin-slack", editable = "../amplifierd-plugins/amplifierd-plugin-slack" },
     { name = "amplifierd-plugin-voice", git = "https://github.com/microsoft/amplifier-voice?rev=main" },
     { name = "click", specifier = ">=8.1.0" },
+]
+
+[[package]]
+name = "amplifier-chat"
+version = "0.1.0"
+source = { git = "https://github.com/microsoft/amplifier-chat?rev=main#99f4e0f25fd95bd6297c1f08047b9ee8b16674ab" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyyaml" },
 ]
 
 [[package]]
@@ -68,7 +79,7 @@ dependencies = [
 [[package]]
 name = "amplifierd"
 version = "0.1.0"
-source = { git = "https://github.com/microsoft/amplifierd?branch=main#dc0b7c7ddc78ef2b8b062cfb76e5ef16a10bd844" }
+source = { git = "https://github.com/microsoft/amplifierd?branch=main#29d3e044a195bf40177a0a9ff82cbf419c53ce4d" }
 dependencies = [
     { name = "amplifier-core" },
     { name = "amplifier-foundation" },
@@ -104,17 +115,6 @@ requires-dist = [
     { name = "six" },
 ]
 provides-extras = ["dev"]
-
-[[package]]
-name = "amplifierd-plugin-chat"
-version = "0.1.0"
-source = { git = "https://github.com/microsoft/amplifier-chat?rev=main#cc32e18aacdac007253effef890e161160df211d" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyyaml" },
-]
 
 [[package]]
 name = "amplifierd-plugin-distro"

@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "amplifierd @ git+https://github.com/microsoft/amplifierd@main",
     "amplifierd-plugin-distro @ git+https://github.com/microsoft/amplifierd@main#subdirectory=amplifierd-plugins/distro",
-    "amplifierd-plugin-chat @ git+https://github.com/microsoft/amplifier-chat@main",
+    "amplifier-chat @ git+https://github.com/microsoft/amplifier-chat@main",
     "amplifierd-plugin-slack @ git+https://github.com/microsoft/amplifierd@main#subdirectory=amplifierd-plugins/slack",
     "amplifierd-plugin-voice @ git+https://github.com/microsoft/amplifier-voice@main",
     "amplifierd-plugin-auth",
@@ -24,7 +24,7 @@ amplifierd-plugin-distro = { path = "../amplifierd-plugins/amplifierd-plugin-dis
 amplifierd-plugin-slack = { path = "../amplifierd-plugins/amplifierd-plugin-slack", editable = true }
 # amplifierd-plugin-voice — now a proper remote dep, no local override needed
 amplifierd-plugin-auth = { path = "../amplifierd-plugins/amplifierd-plugin-auth", editable = true }
-# amplifierd-plugin-chat = { path = "../../amplifier-chat", editable = true }
+# amplifier-chat = { path = "../../amplifier-chat", editable = true }
 
 [tool.hatch.metadata]
 allow-direct-references = true
