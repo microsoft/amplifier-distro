@@ -14,7 +14,7 @@
 
 **Repos NOT touched:**
 - `amplifier-foundation` — use public API only (`registry.update()` for cache invalidation)
-- `amplifierd-plugin-chat` — consumer only; 503 route guard in amplifierd handles it
+- `amplifier-chat` — consumer only; 503 route guard in amplifierd handles it
 
 ---
 
