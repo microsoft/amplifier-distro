@@ -16,5 +16,5 @@ members = [
 # so they resolve for any member that declares them.
 [tool.uv.sources]
 amplifierd = { git = "https://github.com/microsoft/amplifierd", branch = "main" }
-amplifier-chat = { git = "https://github.com/microsoft/amplifier-chat", rev = "d4ecd2a2cdb2d465e1f836a15a20c6f56861792e" }
+amplifier-chat = { git = "https://github.com/microsoft/amplifier-chat", rev = "604ce0448585e191e28cfb23db7f321a80b2b854" }
 amplifierd-plugin-voice = { git = "https://github.com/microsoft/amplifier-voice", branch = "main" }
