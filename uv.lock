@@ -146,7 +146,7 @@ requires-dist = [
 [[package]]
 name = "amplifier-chat"
 version = "0.1.0"
-source = { git = "https://github.com/microsoft/amplifier-chat?branch=main#7c7d8452fbd9b2823c9764c3399a640f426ad509" }
+source = { git = "https://github.com/microsoft/amplifier-chat?branch=main#f340b571bd0333bd6806eae2f50b7464a8c1ab27" }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
@@ -208,7 +208,7 @@ dependencies = [
 [[package]]
 name = "amplifierd"
 version = "0.1.0"
-source = { git = "https://github.com/microsoft/amplifierd?branch=main#2c7ce158d2d3547db2eb907eb11591db67f9c01e" }
+source = { git = "https://github.com/microsoft/amplifierd?branch=main#256c77c16a1bacbe340cf17ec390bf4a4533d2bf" }
 dependencies = [
     { name = "amplifier-core" },
     { name = "amplifier-foundation" },
