@@ -30,7 +30,7 @@ requires-dist = [
 [[package]]
 name = "amplifier-chat"
 version = "0.1.0"
-source = { git = "https://github.com/microsoft/amplifier-chat?rev=main#60b77148f10c0988d66fee1e6501b0edd835b970" }
+source = { git = "https://github.com/microsoft/amplifier-chat?rev=main#2099a680efec9edd3783b6c08828f7167edb226e" }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
@@ -41,7 +41,7 @@ dependencies = [
 
 [[package]]
 name = "amplifier-core"
-version = "1.2.0"
+version = "1.3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -50,28 +50,21 @@ dependencies = [
     { name = "tomli" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/de/53/ece96ba3badc6beb7a899227f6b264598f362bd88e81025e5d97e81742c7/amplifier_core-1.2.0.tar.gz", hash = "sha256:5b7345e894a8b21d18a77a2944fb3aef8dacc3691db608072cfed92cbe606053", size = 309024, upload-time = "2026-03-11T14:24:31.854Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/97/7e/a41e6f823c60d9ddbe67f6eea9479a90c9c2fed8703d514176a217f00fc1/amplifier_core-1.2.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:39e2764ba431e7bd8a5f14af5b6679790dcecdd947ddb22de14a7e7e52f6651f", size = 6972098, upload-time = "2026-03-11T14:24:02.418Z" },
-    { url = "https://files.pythonhosted.org/packages/a2/46/022d6899482cb2fa80fdc4f49abcf8beae2909626ca6e61611012b743536/amplifier_core-1.2.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4d4abe77f3a4cd8b8c0d7113203d83294bc130bd79fce5d4e2de347f6d404462", size = 7177232, upload-time = "2026-03-11T14:24:04.131Z" },
-    { url = "https://files.pythonhosted.org/packages/bc/be/8dc067fd9c687510f47f1e89d5d88f8f04cd429681aca46f1848a165dc2e/amplifier_core-1.2.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:feb2d9e263ff5d70fbda1a42beab4aa57f78167c618889962ba17377ed7e2445", size = 8269821, upload-time = "2026-03-11T14:24:06.071Z" },
-    { url = "https://files.pythonhosted.org/packages/5a/b6/54870680b36700dbaade1fdf665b4a527e0f267080c2d80d70e74e6815bf/amplifier_core-1.2.0-cp312-cp312-win_amd64.whl", hash = "sha256:7935ee68c491e30a6b623d87a8418b4a16d7aaed83f3cd7c910da6fe2dd8e159", size = 8701340, upload-time = "2026-03-11T14:24:07.927Z" },
-    { url = "https://files.pythonhosted.org/packages/b1/bf/d66bc01adcf3f767054a99b514f8cf65ed87d938328de7262f43aad24180/amplifier_core-1.2.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:e7200f74480f2f11b4158ebe83ac832ef2397b7cb45b9302be38f2ed31caa745", size = 6971377, upload-time = "2026-03-11T14:24:09.866Z" },
-    { url = "https://files.pythonhosted.org/packages/02/76/f20ee5bbbd25bd35ecd2d6ff5eed114c98dc2c09bb865463a5c965bb95bd/amplifier_core-1.2.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e368362eb5687462cc4c59896923c55f1db9f1634be081efaa4a515092835cad", size = 7176287, upload-time = "2026-03-11T14:24:11.645Z" },
-    { url = "https://files.pythonhosted.org/packages/de/ef/18dce3df12fbd14a8358b2450bba8c7f6657b9abc7c5046f228c737ebfb4/amplifier_core-1.2.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a3cd92cfb8951e93f00c311757449061877cdc0e44aa50e1cef212e5344f3ec9", size = 8269374, upload-time = "2026-03-11T14:24:13.296Z" },
-    { url = "https://files.pythonhosted.org/packages/bc/b3/37bcfa9cd585fa30c216f958469d957dc8f5bd749735324ba003ffacf53f/amplifier_core-1.2.0-cp313-cp313-win_amd64.whl", hash = "sha256:4532bb3d7909b87c0a760e7d296a02866d27aeab77f695adb2d312266392b33e", size = 8701499, upload-time = "2026-03-11T14:24:15.201Z" },
-    { url = "https://files.pythonhosted.org/packages/2b/7f/fe3692e7535c358514d1e60cbab6d3e21f8136c72d54d378a101dda349d2/amplifier_core-1.2.0-cp313-cp313t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:18a1aac0ac8976ee8a6caa6feb5f15847d99d40ac61e07c2d2d72bdf4910d98d", size = 7169750, upload-time = "2026-03-11T14:24:17.574Z" },
-    { url = "https://files.pythonhosted.org/packages/bb/66/2856d7346dc43c2bf4c76cf4edba1bad113e77de81ac2ae757ba89885408/amplifier_core-1.2.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:cde5e68ec97acb340754f22b6b1e7c4eefd2e61e5f55d85678ca8559a7d61e39", size = 6971341, upload-time = "2026-03-11T14:24:19.18Z" },
-    { url = "https://files.pythonhosted.org/packages/16/fc/717c725d3d82448e1092c57730e8a6c3821adbf866152c566a2b73062756/amplifier_core-1.2.0-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0ba6f7256edd19949687bc0debf6a0f93023b81bfdbad8ca55dc7507e19b1daa", size = 7175676, upload-time = "2026-03-11T14:24:20.955Z" },
-    { url = "https://files.pythonhosted.org/packages/a8/c9/fba346ca331b0dbaaf455d58aa3d73aabd51e57c08df44f1d42d7438a1cb/amplifier_core-1.2.0-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:31d408ba6b3b3850d517ae7dc42a7c177ce5906d597f4b0f33eb71ada9ec805a", size = 8268788, upload-time = "2026-03-11T14:24:22.735Z" },
-    { url = "https://files.pythonhosted.org/packages/f9/63/ab0e0e71c3e5a206703466524a7d94cba630aef8a310bb193bf0dc75b543/amplifier_core-1.2.0-cp314-cp314-win_amd64.whl", hash = "sha256:a73e35b00eed6d876fdc6c0e314b49cbd53188d6c115b8b1dbeda76f3c0e00a0", size = 8701424, upload-time = "2026-03-11T14:24:24.67Z" },
-    { url = "https://files.pythonhosted.org/packages/a1/21/94d70f04ffac16bbfbce1cbafb7fe71428ff953d67a8c8cc69d960dae644/amplifier_core-1.2.0-cp314-cp314t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d7bf87d02e368d08c9aa396720d14c28f832555db3fde580c6318506943e8ae0", size = 7169468, upload-time = "2026-03-11T14:24:26.81Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/9b/c1831daf9f19f819c552fe8a9fd1c11366413e543b1d2b41c60f910c4f1b/amplifier_core-1.3.3-cp311-abi3-macosx_10_12_x86_64.whl", hash = "sha256:eef372360758b28966bde5488422ce097b1c12cae2bdd5f0736dbc5eb19e6f6c", size = 8101195, upload-time = "2026-03-23T14:44:41.21Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/19/0348e6b9e7731f5d17ec15cfc155118f12602bd13be264f511d7d262d973/amplifier_core-1.3.3-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:514edd6fcb59299049730ecf7e5fc1760ac8be73b8ac35c72aafbebb1caf4e92", size = 7220842, upload-time = "2026-03-23T14:44:43.829Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/bc/80abe390d5023b2bedb0e79235075c43dc6dfd93fa5d6819f674157a71fb/amplifier_core-1.3.3-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:2e6b1ce4c39993d1aa510719051d1864726ba603179a0ed830180d3b6798cc55", size = 7599714, upload-time = "2026-03-23T14:44:46.855Z" },
+    { url = "https://files.pythonhosted.org/packages/16/03/7299e57a263f6ef3a77dc9fd94384f4b9f7e44111a0119037c1b0ea25e69/amplifier_core-1.3.3-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:09adf35c52461b297b1aef119dda6c8b209af1b2eb82bd00702c228db8458937", size = 8637800, upload-time = "2026-03-23T14:44:49.138Z" },
+    { url = "https://files.pythonhosted.org/packages/85/62/09d8c57fd97bd9b9e5851da13cd902fc431c80d7a364476b8aae70f2b2c0/amplifier_core-1.3.3-cp311-abi3-win_amd64.whl", hash = "sha256:c09cadb6fe104645386742ebef893f549ffa779f7acc7ec42d5bd949348f2eea", size = 8894201, upload-time = "2026-03-23T14:44:51.892Z" },
+    { url = "https://files.pythonhosted.org/packages/63/80/816f0aec391e20218340fe108c95208e236297c80903d58a9290d83c902c/amplifier_core-1.3.3-cp311-abi3-win_arm64.whl", hash = "sha256:263c43010e1e78668ff34ecddfa0444727bd9a8787d8dc2286a8d3fa619b48de", size = 7666984, upload-time = "2026-03-23T14:44:54.508Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/9a/61003612d9c94b22dd4470f0fe82c1e68f52e7868c8f76b71cdc76471665/amplifier_core-1.3.3-cp313-cp313t-win_arm64.whl", hash = "sha256:883779eb5acf298048a6afa3178a59cfc29d1f05c413d8446e0f6f2340cda794", size = 7659998, upload-time = "2026-03-23T14:44:56.638Z" },
+    { url = "https://files.pythonhosted.org/packages/36/36/ff422fab371c63bde16c8fb2f913265a9e2d2fef61bcce665a5d59124907/amplifier_core-1.3.3-cp314-cp314t-win_arm64.whl", hash = "sha256:2407881ca22feb23f92f7b2606b7b5e99f7f4fccf8b9908dad6c0640ee6a3f64", size = 7663014, upload-time = "2026-03-23T14:44:59.025Z" },
 ]
 
 [[package]]
 name = "amplifier-foundation"
 version = "1.0.0"
-source = { git = "https://github.com/microsoft/amplifier-foundation#f70646b3fbcfeb353b054f5ee52daa0bff501876" }
+source = { git = "https://github.com/microsoft/amplifier-foundation#0e61b03c90df2d29ffd5ee0af7fb5fda5e00002a" }
 dependencies = [
     { name = "amplifier-core" },
     { name = "pyyaml" },
@@ -80,7 +73,7 @@ dependencies = [
 [[package]]
 name = "amplifierd"
 version = "0.1.0"
-source = { git = "https://github.com/microsoft/amplifierd?branch=main#1bd9b24d31360d4b0145aa00750c48ea08da13c8" }
+source = { git = "https://github.com/microsoft/amplifierd?branch=main#256c77c16a1bacbe340cf17ec390bf4a4533d2bf" }
 dependencies = [
     { name = "amplifier-core" },
     { name = "amplifier-foundation" },
