@@ -120,7 +120,7 @@ wheels = [
 
 [[package]]
 name = "amp-distro"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "distro-service" }
 dependencies = [
     { name = "amplifier-chat", extra = ["voice"] },
@@ -146,7 +146,7 @@ requires-dist = [
 [[package]]
 name = "amplifier-chat"
 version = "0.1.0"
-source = { git = "https://github.com/microsoft/amplifier-chat?branch=main#4e0393e821e0fcd0d30cac64be23d94a8d46bf49" }
+source = { git = "https://github.com/microsoft/amplifier-chat?branch=main#28a4f389164801bcca1257c7058cddcd8aee1dea" }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
