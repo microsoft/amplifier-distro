@@ -100,6 +100,18 @@ def test_get_distro_root_unconfigured_redirects(client):
     assert "/distro/setup" in resp.headers["location"]
 
 
+def test_get_distro_root_detected_redirects_to_setup(client, settings):
+    """GET /distro/ with overlay but no configured provider ('detected') redirects to /distro/setup."""
+    # Create overlay so phase is "detected" (not "unconfigured"), but don't register any provider
+    overlay_path = settings.distro_home / "bundle" / "bundle.yaml"
+    overlay_path.parent.mkdir(parents=True, exist_ok=True)
+    overlay_path.write_text("bundle: {name: test}\n")
+
+    resp = client.get("/distro/", follow_redirects=False)
+    assert resp.status_code in (301, 302, 307, 308)
+    assert "/distro/setup" in resp.headers["location"]
+
+
 def test_get_distro_root_configured_serves_dashboard(client, settings):
     """GET /distro/ when configured (overlay exists) serves dashboard.html with 200."""
     # Bootstrap overlay so compute_phase returns "detected" (not "unconfigured")
@@ -180,17 +192,21 @@ def test_wizard_finish_buttons_go_to_distro():
 # ---------------------------------------------------------------------------
 
 
-def test_root_redirects_to_chat_when_configured(app, client, settings):
-    """GET / redirects to /chat/ when overlay exists (configured)."""
+def test_root_redirects_to_chat_when_configured(app, client, settings, monkeypatch):
+    """GET / redirects to /chat/ when phase is 'ready' (overlay + configured provider)."""
     import asyncio
+
+    from distro_plugin.overlay import add_include
+    from distro_plugin.providers import PROVIDERS, add_provider_config
 
     event = asyncio.Event()
     event.set()
     app.state.bundles_ready = event
 
-    overlay_path = settings.distro_home / "bundle" / "bundle.yaml"
-    overlay_path.parent.mkdir(parents=True, exist_ok=True)
-    overlay_path.write_text("bundle: {name: test}\n")
+    # Set up a fully configured provider so compute_phase returns "ready"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-12345")
+    add_provider_config(settings, "anthropic")
+    add_include(settings, PROVIDERS["anthropic"].include)
 
     resp = client.get("/", follow_redirects=False)
     assert resp.status_code == 307

@@ -64,8 +64,8 @@ def test_create_router_handles_no_bundle_registry(tmp_path):
 # -- _patch_provider_loading (#new) ------------------------------------------
 
 
-def test_patch_provider_loading_merges_cli_and_distro_providers(tmp_path):
-    """_patch_provider_loading merges CLI + Distro providers, Distro wins on conflict."""
+def test_patch_provider_loading_returns_only_distro_providers(tmp_path):
+    """_patch_provider_loading returns ONLY Distro providers; CLI-only providers are excluded."""
     import sys
     from types import ModuleType
     from unittest.mock import patch as mock_patch
@@ -96,17 +96,17 @@ def test_patch_provider_loading_merges_cli_and_distro_providers(tmp_path):
         {"amplifierd": fake_amplifierd, "amplifierd.providers": fake_module},
     ):
         _patch_provider_loading(settings)
-        merged = fake_module.load_provider_config()
+        result = fake_module.load_provider_config()
 
-    modules = [p["module"] for p in merged]
+    modules = [p["module"] for p in result]
     assert "provider-openai" in modules, "Distro providers must be included"
-    assert "provider-anthropic" in modules, "CLI-only providers must be included"
-    # Distro ordering comes first, CLI-only appended after
-    assert modules.index("provider-openai") < modules.index("provider-anthropic")
+    assert "provider-anthropic" not in modules, (
+        "CLI-only providers must NOT be included — Distro is fully self-contained"
+    )
 
 
-def test_patch_provider_loading_distro_wins_on_module_conflict(tmp_path):
-    """When CLI and Distro have the same module, Distro's entry wins."""
+def test_patch_provider_loading_distro_only_ignores_cli_on_same_module(tmp_path):
+    """When CLI and Distro have the same module, only Distro's entry is returned."""
     import sys
     from types import ModuleType
     from unittest.mock import patch as mock_patch
@@ -137,10 +137,10 @@ def test_patch_provider_loading_distro_wins_on_module_conflict(tmp_path):
         {"amplifierd": fake_amplifierd, "amplifierd.providers": fake_module},
     ):
         _patch_provider_loading(settings)
-        merged = fake_module.load_provider_config()
+        result = fake_module.load_provider_config()
 
-    assert len(merged) == 1, "Conflict should produce a single merged entry"
-    assert merged[0]["config"]["priority"] == 1, "Distro entry wins on conflict"
+    assert len(result) == 1, "Only the Distro entry should be returned"
+    assert result[0]["config"]["priority"] == 1, "Distro entry is returned unchanged"
 
 
 def test_patch_provider_loading_handles_missing_amplifierd(tmp_path):

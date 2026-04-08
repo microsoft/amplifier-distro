@@ -12,19 +12,19 @@ from distro_plugin.routes import create_routes
 
 
 def _patch_provider_loading(settings: DistroPluginSettings) -> None:
-    """Patch amplifierd's load_provider_config to merge CLI + Distro providers.
+    """Patch amplifierd's load_provider_config to read from Distro's settings only.
 
-    The amplifierd package reads provider config only from ~/.amplifier/settings.yaml.
-    Distro now stores its own provider config in ~/.amplifier-distro/settings.yaml.
-    This patch makes load_provider_config() merge both sources so that Distro
-    sessions see providers from both files, with Distro entries winning on conflict.
+    The amplifierd package reads provider config from ~/.amplifier/settings.yaml by
+    default (the CLI's home).  Distro stores its own provider config in
+    ~/.amplifier-distro/settings.yaml.  This patch replaces the default so that
+    Distro sessions use ONLY the providers the user registered through Distro's UI.
+    The CLI's settings.yaml is completely irrelevant to Distro sessions.
 
     The patch is safe because:
     - amplifierd imports load_provider_config with local imports inside functions
       (app.py:47, session_manager.py:265, session_manager.py:413), so the
       module-level attribute is resolved at call time.
-    - When the env var / distro settings are absent, behavior is identical to
-      the original (backward-compatible).
+    - Distro is fully self-contained: all provider setup goes through Distro's UI.
     """
     try:
         import amplifierd.providers as _amp_providers
@@ -35,40 +35,8 @@ def _patch_provider_loading(settings: DistroPluginSettings) -> None:
     distro_home = settings.distro_home
 
     def _merged_load_provider_config(home=None):
-        """Load providers from CLI settings, then overlay Distro providers."""
-        cli_providers = _original_load(home)
-        # Read Distro's own provider config
-        distro_providers = _original_load(distro_home)
-        if not distro_providers:
-            return cli_providers
-        if not cli_providers:
-            return distro_providers
-        # Merge: Distro providers win on module-name conflict
-        cli_by_module = {
-            p["module"]: p
-            for p in cli_providers
-            if isinstance(p, dict) and "module" in p
-        }
-        distro_by_module = {
-            p["module"]: p
-            for p in distro_providers
-            if isinstance(p, dict) and "module" in p
-        }
-        # Start with CLI providers, override with Distro where they share a module
-        merged_modules = dict(cli_by_module)
-        merged_modules.update(distro_by_module)
-        # Preserve Distro ordering for providers that exist in Distro,
-        # append CLI-only providers at the end
-        result = []
-        seen: set[str] = set()
-        for p in distro_providers:
-            if isinstance(p, dict) and "module" in p:
-                result.append(merged_modules[p["module"]])
-                seen.add(p["module"])
-        for p in cli_providers:
-            if isinstance(p, dict) and "module" in p and p["module"] not in seen:
-                result.append(p)
-        return result
+        """Load providers from Distro's own settings only."""
+        return _original_load(distro_home)
 
     _amp_providers.load_provider_config = _merged_load_provider_config
 
@@ -157,7 +125,7 @@ def create_router(state: Any) -> APIRouter:
     settings = DistroPluginSettings()
     state.distro = SimpleNamespace(settings=settings)
 
-    # Patch load_provider_config to merge CLI + Distro providers
+    # Patch load_provider_config so Distro sessions use only Distro's own providers
     _patch_provider_loading(settings)
 
     from distro_plugin.overlay import migrate_overlay, overlay_exists
@@ -176,7 +144,7 @@ def create_router(state: Any) -> APIRouter:
         bundle_registry.register({"distro": overlay_dir})
 
     # Reconcile provider overlay includes: ensure every provider recorded in
-    # settings (Distro or CLI) has a matching include in the overlay bundle.
+    # Distro's own settings has a matching include in the overlay bundle.
     # This migrates keyless providers (e.g. GitHub Copilot) that were
     # registered before the overlay-include step was unconditional.
     _reconcile_provider_overlay(settings)
