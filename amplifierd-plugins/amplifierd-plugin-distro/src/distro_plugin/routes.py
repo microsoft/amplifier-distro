@@ -41,7 +41,6 @@ from distro_plugin.providers import (
     check_provider_status,
     get_provider_catalog,
     handle_provider_request,
-    sync_providers,
     update_provider_model,
 )
 from distro_plugin.reload import request_reload
@@ -779,11 +778,10 @@ def create_routes() -> APIRouter:
                 raise HTTPException(status_code=400, detail=result.get("detail", ""))
             request_reload(request.app)
             return result
-        # Sync mode: auto-register providers from environment keys
-        results = sync_providers(settings)
-        if results:
-            request_reload(request.app)
-        return {"status": "ok", "synced": len(results)}
+        # No explicit provider action — user is just proceeding to the next step.
+        # Providers are registered individually via POST /distro/provider or
+        # auto-detect (e.g. GitHub Copilot).  "Next" means "I'm done here."
+        return {"status": "ok", "synced": 0}
 
     @router.post("/setup/steps/verify")
     async def step_verify(request: Request) -> dict[str, Any]:

@@ -95,13 +95,14 @@ def test_step_provider_with_key_registers(settings, client, monkeypatch):
     assert data.get("provider") == "anthropic"
 
 
-def test_step_provider_sync_mode(settings, client, monkeypatch):
-    """POST /distro/setup/steps/provider with empty provider+key triggers sync."""
-    called_with = []
-    monkeypatch.setattr(
-        "distro_plugin.routes.sync_providers",
-        lambda s: (called_with.append(s), [])[1],
-    )
+def test_step_provider_empty_body_returns_ok_without_sync(
+    settings, client, monkeypatch
+):
+    """POST /distro/setup/steps/provider with empty provider+key returns synced=0."""
+    # Verify that sync_providers is never called from routes (it's not even imported there)
+    # by confirming the response carries synced=0 regardless of env state.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-key-in-env")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-key-in-env")
 
     resp = client.post(
         "/distro/setup/steps/provider",
@@ -111,8 +112,30 @@ def test_step_provider_sync_mode(settings, client, monkeypatch):
 
     data = resp.json()
     assert data.get("status") == "ok"
-    assert "synced" in data
-    assert len(called_with) == 1
+    assert data.get("synced") == 0, (
+        "synced must be 0 — no auto-registration on empty body"
+    )
+
+
+def test_step_provider_empty_body_does_not_call_handle_provider_request(
+    settings, client, monkeypatch
+):
+    """POST /distro/setup/steps/provider with empty body does not register any provider."""
+    register_called = []
+    monkeypatch.setattr(
+        "distro_plugin.routes.handle_provider_request",
+        lambda *a, **kw: (register_called.append((a, kw)), {})[1],
+    )
+
+    resp = client.post(
+        "/distro/setup/steps/provider",
+        json={"provider": "", "api_key": ""},
+    )
+    assert resp.status_code == 200
+    assert resp.json().get("synced") == 0
+    assert len(register_called) == 0, (
+        "handle_provider_request must NOT be called on empty body"
+    )
 
 
 def test_step_verify_returns_status(settings, client):
