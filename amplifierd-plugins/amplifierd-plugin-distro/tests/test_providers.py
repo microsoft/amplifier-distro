@@ -605,17 +605,27 @@ def test_check_provider_status_github_copilot_has_key_without_env(
     assert status["configured"] is False
 
 
+def test_register_keyless_provider_adds_overlay_include(settings, monkeypatch):
+    """register_provider for a keyless provider adds its include to the overlay bundle."""
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    result = register_provider(settings, "github-copilot", "")
+    assert result.overlay_updated is True
+
+    from distro_plugin.overlay import get_includes
+
+    includes = get_includes(settings)
+    assert PROVIDERS["github-copilot"].include in includes
+
+
 def test_check_provider_status_github_copilot_configured(settings, monkeypatch):
-    """Fully registered GitHub Copilot shows configured=True (no overlay needed)."""
+    """Fully registered GitHub Copilot shows configured=True with overlay populated."""
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     register_provider(settings, "github-copilot", "")
     status = check_provider_status(settings, "github-copilot")
     assert status["has_key"] is True
     assert status["in_settings"] is True
-    assert status["in_overlay"] is False  # keyless providers skip overlay
-    assert (
-        status["configured"] is True
-    )  # configured = has_key + in_settings for keyless
+    assert status["in_overlay"] is True  # keyless providers now get overlay include
+    assert status["configured"] is True
 
 
 def test_get_provider_catalog_includes_needs_key_and_fallback_models(settings):
