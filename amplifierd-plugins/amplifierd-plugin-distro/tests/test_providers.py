@@ -342,7 +342,7 @@ class TestLegacySettingsCompat:
 
     def test_add_provider_config_idempotent_legacy_no_id_field(self, settings):
         """Legacy entries without 'id' should not be duplicated."""
-        settings_path = settings.amplifier_home / "settings.yaml"
+        settings_path = settings.distro_home / "settings.yaml"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text(
             yaml.dump(
@@ -370,7 +370,7 @@ class TestLegacySettingsCompat:
 
     def test_add_provider_config_legacy_does_not_demote_priority(self, settings):
         """When a legacy entry matches, its priority should NOT be demoted."""
-        settings_path = settings.amplifier_home / "settings.yaml"
+        settings_path = settings.distro_home / "settings.yaml"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text(
             yaml.dump(
@@ -395,7 +395,7 @@ class TestLegacySettingsCompat:
 
     def test_add_provider_config_legacy_preserves_custom_fields(self, settings):
         """Legacy entries with custom config fields should be preserved, not overwritten."""
-        settings_path = settings.amplifier_home / "settings.yaml"
+        settings_path = settings.distro_home / "settings.yaml"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text(
             yaml.dump(
@@ -431,7 +431,7 @@ class TestLegacySettingsCompat:
 
     def test_check_provider_status_finds_legacy_entry(self, settings):
         """check_provider_status should detect legacy entries without 'id'."""
-        settings_path = settings.amplifier_home / "settings.yaml"
+        settings_path = settings.distro_home / "settings.yaml"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text(
             yaml.dump(
@@ -452,7 +452,7 @@ class TestLegacySettingsCompat:
 
     def test_sync_providers_does_not_duplicate_legacy(self, settings, monkeypatch):
         """sync_providers should not re-register providers present in legacy format."""
-        settings_path = settings.amplifier_home / "settings.yaml"
+        settings_path = settings.distro_home / "settings.yaml"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text(
             yaml.dump(
@@ -473,6 +473,7 @@ class TestLegacySettingsCompat:
         )
         # Set API key in both keys.env and os.environ
         keys_path = settings.amplifier_home / "keys.env"
+        keys_path.parent.mkdir(parents=True, exist_ok=True)
         keys_path.write_text('ANTHROPIC_API_KEY="sk-ant-test123"\n')
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test123")
 
@@ -612,7 +613,9 @@ def test_check_provider_status_github_copilot_configured(settings, monkeypatch):
     assert status["has_key"] is True
     assert status["in_settings"] is True
     assert status["in_overlay"] is False  # keyless providers skip overlay
-    assert status["configured"] is True  # configured = has_key + in_settings for keyless
+    assert (
+        status["configured"] is True
+    )  # configured = has_key + in_settings for keyless
 
 
 def test_get_provider_catalog_includes_needs_key_and_fallback_models(settings):
@@ -631,3 +634,19 @@ def test_get_provider_catalog_includes_needs_key_and_fallback_models(settings):
     anthropic = next(p for p in catalog if p["id"] == "anthropic")
     assert anthropic["needs_key"] is True
     assert anthropic["default_model"] == "claude-sonnet-4-6"
+
+
+# -- Provider settings path separation (#new) --------------------------------
+
+
+def test_settings_path_uses_distro_home(settings):
+    """_settings_path returns distro_home/settings.yaml, not amplifier_home/settings.yaml."""
+    expected = settings.distro_home / "settings.yaml"
+    assert _settings_path(settings) == expected
+
+
+def test_add_provider_config_writes_to_distro_home(settings):
+    """add_provider_config creates settings.yaml under distro_home, never amplifier_home."""
+    add_provider_config(settings, "anthropic")
+    assert (settings.distro_home / "settings.yaml").exists()
+    assert not (settings.amplifier_home / "settings.yaml").exists()

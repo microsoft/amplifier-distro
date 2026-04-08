@@ -260,7 +260,7 @@ def _keys_path(settings: DistroPluginSettings) -> Path:
 
 
 def _settings_path(settings: DistroPluginSettings) -> Path:
-    return Path(settings.amplifier_home) / "settings.yaml"
+    return Path(settings.distro_home) / "settings.yaml"
 
 
 # ---------------------------------------------------------------------------
