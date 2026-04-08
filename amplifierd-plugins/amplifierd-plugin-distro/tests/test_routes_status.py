@@ -39,21 +39,52 @@ def test_detect_returns_expected_structure(client):
 
 
 def test_status_phase_ready_when_overlay_and_provider(settings, client, monkeypatch):
-    """Status phase becomes 'ready' when overlay exists and a provider key is set."""
+    """Status phase becomes 'ready' when overlay exists AND provider is fully configured in Distro's settings."""
     from distro_plugin.overlay import add_include
-    from distro_plugin.providers import PROVIDERS
-
-    # Create the overlay so overlay_exists() returns True
-    add_include(settings, PROVIDERS["anthropic"].include)
+    from distro_plugin.providers import PROVIDERS, add_provider_config
 
     # Set a provider API key in environment
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-12345")
+
+    # Register provider in Distro's settings.yaml (in_settings = True)
+    add_provider_config(settings, "anthropic")
+
+    # Add provider include to overlay (in_overlay = True)
+    add_include(settings, PROVIDERS["anthropic"].include)
 
     resp = client.get("/distro/status")
     assert resp.status_code == 200
 
     data = resp.json()
     assert data["phase"] == "ready"
+
+
+def test_status_phase_detected_when_overlay_and_env_key_but_no_configured_provider(
+    settings, client, monkeypatch
+):
+    """Status phase is 'detected' when overlay exists and env key set, but provider not in Distro settings.
+
+    This covers existing users upgrading: they may have ANTHROPIC_API_KEY set in their
+    environment and the overlay exists, but have never registered a provider through
+    Distro's UI. They should see the wizard's provider step once more.
+    """
+    from distro_plugin.overlay import add_include
+    from distro_plugin.providers import PROVIDERS
+
+    # Create overlay so overlay_exists() returns True
+    add_include(settings, PROVIDERS["anthropic"].include)
+
+    # Key is in env — but provider is NOT registered in distro_home/settings.yaml
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-12345")
+
+    resp = client.get("/distro/status")
+    assert resp.status_code == 200
+
+    data = resp.json()
+    assert data["phase"] == "detected", (
+        "Expected 'detected': overlay exists and env key is set, "
+        "but no provider is fully configured in Distro's own settings"
+    )
 
 
 def test_status_phase_detected_when_overlay_but_no_provider_key(

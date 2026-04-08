@@ -126,3 +126,58 @@ def test_update_raises_on_invalid_section(tmp_path):
     s = _make_settings(tmp_path)
     with pytest.raises(AttributeError):
         update(s, section="nonexistent", some_key="value")
+
+
+def test_save_preserves_non_owned_sections(tmp_path):
+    """save() must not erase keys it doesn't own (e.g. config.providers)."""
+    s = _make_settings(tmp_path)
+    path = settings_path(s)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Simulate providers.py writing config.providers to the shared file
+    existing = {
+        "workspace_root": "~/old",
+        "config": {"providers": [{"name": "openai", "model": "gpt-4o"}]},
+    }
+    path.write_text(yaml.dump(existing))
+
+    # Now save() with DistroSettings — should update distro keys but keep config
+    ds = DistroSettings(workspace_root="~/new")
+    save(s, ds)
+
+    raw = yaml.safe_load(path.read_text())
+    # DistroSettings field updated
+    assert raw["workspace_root"] == "~/new"
+    # config.providers untouched
+    assert raw["config"]["providers"] == [{"name": "openai", "model": "gpt-4o"}]
+
+
+def test_save_with_no_existing_file_creates_file(tmp_path):
+    """save() with no prior file still works and writes all DistroSettings fields."""
+    s = _make_settings(tmp_path)
+    ds = DistroSettings(workspace_root="/fresh")
+    save(s, ds)
+
+    raw = yaml.safe_load(settings_path(s).read_text())
+    assert raw["workspace_root"] == "/fresh"
+    assert "identity" in raw
+    assert "slack" in raw
+
+
+def test_update_preserves_non_owned_sections(tmp_path):
+    """update() round-trip must not erase keys it doesn't own."""
+    s = _make_settings(tmp_path)
+    path = settings_path(s)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing = {
+        "workspace_root": "~/before",
+        "config": {"providers": [{"name": "anthropic"}]},
+    }
+    path.write_text(yaml.dump(existing))
+
+    update(s, workspace_root="~/after")
+
+    raw = yaml.safe_load(path.read_text())
+    assert raw["workspace_root"] == "~/after"
+    assert raw["config"]["providers"] == [{"name": "anthropic"}]

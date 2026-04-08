@@ -41,7 +41,6 @@ from distro_plugin.providers import (
     check_provider_status,
     get_provider_catalog,
     handle_provider_request,
-    sync_providers,
     update_provider_model,
 )
 from distro_plugin.reload import request_reload
@@ -118,16 +117,36 @@ def compute_phase(settings: DistroPluginSettings) -> str:
     """Determine the current setup phase based on overlay and provider state.
 
     Returns one of: ``'unconfigured'``, ``'detected'``, ``'ready'``.
+
+    The logic is:
+    - No overlay → ``'unconfigured'`` (first-run wizard)
+    - Overlay + at least one fully-configured provider in Distro's settings → ``'ready'``
+    - Overlay + no configured provider (even if env keys exist) → ``'detected'``
+      This covers users who have API keys in their environment but have not yet
+      registered a provider through Distro's UI (e.g. after an upgrade).
+      They will see the wizard provider step once more.
     """
     if not overlay_exists(settings):
         return "unconfigured"
 
-    # Check if any provider env var is set
-    for provider in PROVIDERS.values():
-        if os.environ.get(provider.env_var):
-            return "ready"
+    # Check if at least one provider is configured in Distro's own settings.
+    # "configured" means: key present + entry in settings.yaml + include in overlay.
+    has_configured_provider = False
+    for pid in PROVIDERS:
+        status = check_provider_status(settings, pid)
+        if status["configured"]:
+            has_configured_provider = True
+            break
 
-    return "detected"
+    if not has_configured_provider:
+        # Keys may exist in env, but no provider is fully set up in Distro.
+        # Return "detected" so the wizard's provider step is shown.
+        for provider in PROVIDERS.values():
+            if os.environ.get(provider.env_var):
+                return "detected"  # has keys but needs provider setup in Distro
+        return "detected"
+
+    return "ready"
 
 
 def _get_current_provider(settings: DistroPluginSettings) -> dict[str, Any] | None:
@@ -266,7 +285,7 @@ def create_routes() -> APIRouter:
 
         try:
             settings = _get_settings(request)
-            if compute_phase(settings) == "unconfigured":
+            if compute_phase(settings) != "ready":
                 return RedirectResponse(url="/distro/setup")
         except Exception:
             pass
@@ -759,11 +778,10 @@ def create_routes() -> APIRouter:
                 raise HTTPException(status_code=400, detail=result.get("detail", ""))
             request_reload(request.app)
             return result
-        # Sync mode: auto-register providers from environment keys
-        results = sync_providers(settings)
-        if results:
-            request_reload(request.app)
-        return {"status": "ok", "synced": len(results)}
+        # No explicit provider action — user is just proceeding to the next step.
+        # Providers are registered individually via POST /distro/provider or
+        # auto-detect (e.g. GitHub Copilot).  "Next" means "I'm done here."
+        return {"status": "ok", "synced": 0}
 
     @router.post("/setup/steps/verify")
     async def step_verify(request: Request) -> dict[str, Any]:
@@ -831,7 +849,8 @@ def create_routes() -> APIRouter:
                 )
 
         settings = _get_settings(request)
-        if compute_phase(settings) == "unconfigured":
+        phase = compute_phase(settings)
+        if phase != "ready":
             return RedirectResponse(url="/distro/setup")
         html_path = _STATIC_DIR / "dashboard.html"
         try:

@@ -260,7 +260,7 @@ def _keys_path(settings: DistroPluginSettings) -> Path:
 
 
 def _settings_path(settings: DistroPluginSettings) -> Path:
-    return Path(settings.amplifier_home) / "settings.yaml"
+    return Path(settings.distro_home) / "settings.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -469,15 +469,12 @@ def register_provider(
     result.settings_updated = True
 
     # 3. Add provider include to overlay bundle (recoverable).
-    #    Skip for keyless providers — their bundle YAML declares the module,
-    #    and the settings.yaml entry (step 2) already loads it.  Adding both
-    #    causes a duplicate-module error in the kernel.
-    if provider.needs_key:
-        try:
-            add_include(settings, provider.include)
-            result.overlay_updated = True
-        except OSError as exc:
-            result.overlay_error = str(exc)
+    #    add_include() is idempotent — safe to call for all providers.
+    try:
+        add_include(settings, provider.include)
+        result.overlay_updated = True
+    except OSError as exc:
+        result.overlay_error = str(exc)
 
     return result
 

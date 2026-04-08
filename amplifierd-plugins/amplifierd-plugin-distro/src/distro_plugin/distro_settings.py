@@ -199,10 +199,27 @@ def save(settings: DistroPluginSettings, distro: DistroSettings) -> Path:
     Writes to a temporary file in the same directory then renames it into
     place.  On POSIX the rename is atomic, so a crash mid-write can never
     leave a truncated settings file.
+
+    Preserves any keys in the existing file that are not owned by
+    ``DistroSettings`` (e.g. the ``config.providers`` section written by
+    ``providers.py``).
     """
     path = settings_path(settings)
     path.parent.mkdir(parents=True, exist_ok=True)
-    content = yaml.dump(asdict(distro), default_flow_style=False, sort_keys=False)
+
+    # Read existing file content so we can preserve keys not owned by DistroSettings
+    # (e.g. config.providers written by providers.py).
+    existing_data: dict[str, Any] = {}
+    if path.exists():
+        try:
+            existing_data = yaml.safe_load(path.read_text()) or {}
+        except (yaml.YAMLError, OSError):
+            existing_data = {}
+
+    # Merge: DistroSettings fields overwrite, everything else is preserved.
+    existing_data.update(asdict(distro))
+
+    content = yaml.dump(existing_data, default_flow_style=False, sort_keys=False)
 
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".settings-", suffix=".yaml.tmp")
     try:
